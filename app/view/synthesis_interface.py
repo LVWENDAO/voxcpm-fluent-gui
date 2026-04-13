@@ -11,7 +11,7 @@ from qfluentwidgets import (ScrollArea, CardWidget, TitleLabel, CaptionLabel,
                             TextEdit, Slider, SwitchButton, PrimaryPushButton, PushButton,
                             FluentIcon as FIF, InfoBar, InfoBarPosition, TransparentToolButton,
                             BodyLabel, StrongBodyLabel, ProgressRing, ToolTipFilter,
-                            IndeterminateProgressBar)
+                            IndeterminateProgressBar, isDarkTheme, qconfig)
 
 from app.common.style_sheet import StyleSheet
 
@@ -570,7 +570,24 @@ class SynthesisInterface(ScrollArea):
     def __onGenerateClicked(self):
         text = self.textInput.toPlainText().strip()
         if not text:
-            InfoBar.warning(title='提示', content="请先输入目标文本", parent=self)
+            InfoBar.warning(
+                title='提示', 
+                content="请先输入目标文本", 
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=3000
+            )
+            return
+        
+        # 检查服务器状态
+        if self.serverProcess.state() == QProcess.NotRunning:
+            InfoBar.warning(
+                title='提示', 
+                content="服务器未启动，请先启动推理服务器", 
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=3000
+            )
             return
         
         # 显示进度条
@@ -614,14 +631,38 @@ class SynthesisInterface(ScrollArea):
                 if audio_path and os.path.exists(audio_path):
                     # 加载音频文件，等待用户点击播放
                     self.playerCard.play_audio(audio_path)
-                    InfoBar.success(title='成功', content=f"音频已生成: {os.path.basename(audio_path)}，点击播放按钮开始播放", parent=self)
+                    InfoBar.success(
+                        title='成功', 
+                        content=f"音频已生成: {os.path.basename(audio_path)}，点击播放按钮开始播放", 
+                        parent=self,
+                        position=InfoBarPosition.TOP,
+                        duration=3000
+                    )
                 else:
-                    InfoBar.warning(title='警告', content="音频文件未找到或路径无效", parent=self)
+                    InfoBar.warning(
+                        title='警告', 
+                        content="音频文件未找到或路径无效", 
+                        parent=self,
+                        position=InfoBarPosition.TOP,
+                        duration=3000
+                    )
             else:
                 error_msg = data.get('error') or data.get('detail', '未知错误')
-                InfoBar.error(title='错误', content=error_msg, parent=self)
+                InfoBar.error(
+                    title='错误', 
+                    content=error_msg, 
+                    parent=self,
+                    position=InfoBarPosition.TOP,
+                    duration=-1  # 不自动消失
+                )
         else:
-            InfoBar.error(title='网络错误', content="无法连接到推理服务器，请检查服务是否启动。", parent=self)
+            InfoBar.error(
+                title='网络错误', 
+                content="无法连接到推理服务器，请检查服务是否启动。", 
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=-1  # 不自动消失
+            )
         
         reply.deleteLater()
 
