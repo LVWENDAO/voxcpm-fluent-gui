@@ -10,7 +10,8 @@ from PyQt5.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaContent
 from qfluentwidgets import (ScrollArea, CardWidget, TitleLabel, CaptionLabel, 
                             TextEdit, Slider, SwitchButton, PrimaryPushButton, PushButton,
                             FluentIcon as FIF, InfoBar, InfoBarPosition, TransparentToolButton,
-                            BodyLabel, StrongBodyLabel, ProgressRing, ToolTipFilter)
+                            BodyLabel, StrongBodyLabel, ProgressRing, ToolTipFilter,
+                            IndeterminateProgressBar)
 
 from app.common.style_sheet import StyleSheet
 
@@ -70,30 +71,32 @@ class AudioPlayerCard(CardWidget):
         # 绑定信号
         self.media_player.durationChanged.connect(self.on_duration_changed)
         self.media_player.positionChanged.connect(self.on_position_changed)
+        self.media_player.stateChanged.connect(self.on_state_changed)
+        self.media_player.mediaStatusChanged.connect(self.on_media_status_changed)
 
     def toggle_play(self):
         if self.media_player.state() == QMediaPlayer.PlayingState:
+            # 正在播放，暂停
             self.media_player.pause()
-            self.is_playing = False
-            self.playBtn.setIcon(FIF.PLAY)
-            self.statusLabel.setText("已暂停")
         else:
+            # 暂停或停止状态，检查是否有媒体
             if self.media_player.media().isNull():
                 return
+            # 如果已经播放完成，重置到开头
+            if self.media_player.position() >= self.duration - 100:  # 允许100ms误差
+                self.media_player.setPosition(0)
             self.media_player.play()
-            self.is_playing = True
-            self.playBtn.setIcon(FIF.PAUSE)
-            self.statusLabel.setText("正在播放...")
 
     def play_audio(self, audio_path):
+        """加载音频文件，但不自动播放"""
         if not audio_path or not os.path.exists(audio_path):
             return
         media_content = QMediaContent(QUrl.fromLocalFile(audio_path))
         self.media_player.setMedia(media_content)
-        self.media_player.play()
-        self.is_playing = True
-        self.playBtn.setIcon(FIF.PAUSE)
-        self.statusLabel.setText("正在播放...")
+        # 不自动播放，等待用户点击播放按钮
+        self.is_playing = False
+        self.playBtn.setIcon(FIF.PLAY)
+        self.statusLabel.setText("准备就绪")
 
     def on_slider_pressed(self):
         pass
@@ -111,6 +114,34 @@ class AudioPlayerCard(CardWidget):
         if not self.slider.isSliderDown() and self.duration > 0:
             self.slider.setValue(int(position / self.duration * 1000))
         self.currentTimeLabel.setText(self.__format_time(position))
+
+    def on_state_changed(self, state):
+        """处理播放器状态变化"""
+        if state == QMediaPlayer.StoppedState:
+            # 播放停止，还原UI
+            self.is_playing = False
+            self.playBtn.setIcon(FIF.PLAY)
+            self.statusLabel.setText("播放完成")
+        elif state == QMediaPlayer.PlayingState:
+            # 正在播放
+            self.is_playing = True
+            self.playBtn.setIcon(FIF.PAUSE)
+            self.statusLabel.setText("正在播放...")
+        elif state == QMediaPlayer.PausedState:
+            # 暂停
+            self.is_playing = False
+            self.playBtn.setIcon(FIF.PLAY)
+            self.statusLabel.setText("已暂停")
+
+    def on_media_status_changed(self, status):
+        """处理媒体状态变化"""
+        if status == QMediaPlayer.EndOfMedia:
+            # 播放完成，重置进度条和时间
+            self.slider.setValue(0)
+            self.currentTimeLabel.setText("00:00")
+            self.statusLabel.setText("播放完成")
+            self.is_playing = False
+            self.playBtn.setIcon(FIF.PLAY)
 
     def __format_time(self, ms):
         seconds = int(ms / 1000)
@@ -298,14 +329,22 @@ class SynthesisInterface(ScrollArea):
         serverLayout.setSpacing(8)
 
         serverHeader = QHBoxLayout()
-        self.statusIndicator = CaptionLabel("● 离线")
-        self.statusIndicator.setStyleSheet("color: gray;")
+        # 服务器状态标签
+        statusLabel = CaptionLabel("服务器状态：")
+        self.statusIndicator = QLabel("● 离线")
+        self.statusIndicator.setStyleSheet("color: #808080; font-size: 14px;")
         self.startServerBtn = PushButton(FIF.PLAY, "启动服务")
-        self.startServerBtn.setFixedWidth(140) # 增加宽度以显示完整文本
+        self.startServerBtn.setFixedWidth(140)
         self.startServerBtn.clicked.connect(self.__toggle_server)
+        serverHeader.addWidget(statusLabel)
         serverHeader.addWidget(self.statusIndicator)
         serverHeader.addStretch()
         serverHeader.addWidget(self.startServerBtn)
+
+        # 添加服务器启动进度条（初始隐藏）
+        self.serverProgressBar = IndeterminateProgressBar(self)
+        self.serverProgressBar.setFixedHeight(3)
+        self.serverProgressBar.setVisible(False)
 
         self.serverLogCard = ServerLogCard()
         # 优化日志卡片内部间距
@@ -313,6 +352,7 @@ class SynthesisInterface(ScrollArea):
         self.serverLogCard.logArea.setMaximumHeight(120) # 限制高度
 
         serverLayout.addLayout(serverHeader)
+        serverLayout.addWidget(self.serverProgressBar)
         serverLayout.addWidget(self.serverLogCard)
 
         # 初始化 QProcess
@@ -328,10 +368,24 @@ class SynthesisInterface(ScrollArea):
         refLayout.setSpacing(8)
         
         refTitle = StrongBodyLabel("参考音频（可选）")
+        
+        # 上传按钮和清空按钮的水平布局
+        uploadLayout = QHBoxLayout()
         self.uploadBtn = PushButton(FIF.FOLDER_ADD, "上传参考音频")
         self.uploadBtn.setToolTip("上传参考音频以实现声音克隆，支持 WAV/MP3/FLAC 格式")
         self.uploadBtn.installEventFilter(ToolTipFilter(self.uploadBtn))
         self.uploadBtn.clicked.connect(self.__onUploadRef)
+        
+        # 清空按钮（始终显示）
+        self.clearAudioBtn = TransparentToolButton(FIF.DELETE)
+        self.clearAudioBtn.setFixedSize(32, 32)
+        self.clearAudioBtn.setToolTip("清空当前选择的音频文件（需确认）")
+        self.clearAudioBtn.installEventFilter(ToolTipFilter(self.clearAudioBtn))
+        self.clearAudioBtn.clicked.connect(self.__onClearAudio)
+        
+        uploadLayout.addWidget(self.uploadBtn, 1)  # 1表示扩展填充
+        uploadLayout.addWidget(self.clearAudioBtn)
+        uploadLayout.addStretch()
         
         ultimateLayout = QHBoxLayout()
         self.ultimateSwitch = SwitchButton()
@@ -346,7 +400,7 @@ class SynthesisInterface(ScrollArea):
         ultimateLayout.addStretch(1)
         
         refLayout.addWidget(refTitle)
-        refLayout.addWidget(self.uploadBtn)
+        refLayout.addLayout(uploadLayout)
         
         # ASR 文本输入框 (始终显示)
         self.asrInput = TextEdit()
@@ -471,6 +525,11 @@ class SynthesisInterface(ScrollArea):
         self.generateBtn.installEventFilter(ToolTipFilter(self.generateBtn))
         self.generateBtn.clicked.connect(self.__onGenerateClicked)
 
+        # 添加推理进度条（初始隐藏）
+        self.inferenceProgressBar = IndeterminateProgressBar(self)
+        self.inferenceProgressBar.setFixedHeight(3)
+        self.inferenceProgressBar.setVisible(False)
+
         # 3. 音频播放器（默认可见）
         self.playerCard = AudioPlayerCard()
 
@@ -480,6 +539,7 @@ class SynthesisInterface(ScrollArea):
         rightLayout.addWidget(textCard)
         rightLayout.addWidget(advCard)
         rightLayout.addWidget(self.generateBtn)
+        rightLayout.addWidget(self.inferenceProgressBar)  # 添加推理进度条
         rightLayout.addWidget(self.playerCard)
         rightLayout.addWidget(self.perfCard)
         rightLayout.addStretch(1)
@@ -498,11 +558,24 @@ class SynthesisInterface(ScrollArea):
         self.network_manager = QNetworkAccessManager(self)
         self.server_url = "http://127.0.0.1:8000"
 
+    def __onClearAudio(self):
+        """清空当前选择的音频文件（容错处理）"""
+        if not hasattr(self, 'ref_audio_path') or not self.ref_audio_path:
+            return  # 未选择音频时静默返回，不报错
+        
+        self.ref_audio_path = None
+        self.uploadBtn.setText("上传参考音频")
+        self.uploadBtn.setIcon(FIF.FOLDER_ADD)
+
     def __onGenerateClicked(self):
         text = self.textInput.toPlainText().strip()
         if not text:
             InfoBar.warning(title='提示', content="请先输入目标文本", parent=self)
             return
+        
+        # 显示进度条
+        self.inferenceProgressBar.setVisible(True)
+        self.inferenceProgressBar.start()
         
         self.generateBtn.setEnabled(False)
         self.generateBtn.setText("推理中...")
@@ -525,6 +598,10 @@ class SynthesisInterface(ScrollArea):
         reply.finished.connect(lambda: self.__on_inference_finished(reply))
 
     def __on_inference_finished(self, reply):
+        # 隐藏进度条
+        self.inferenceProgressBar.stop()
+        self.inferenceProgressBar.setVisible(False)
+        
         self.generateBtn.setEnabled(True)
         self.generateBtn.setText("开始生成")
         self.generateBtn.setToolTip("开始语音合成，请确保已填写目标文本")
@@ -535,9 +612,9 @@ class SynthesisInterface(ScrollArea):
             if data.get("success") or data.get("status") == "success":
                 audio_path = data.get('audio_path')
                 if audio_path and os.path.exists(audio_path):
-                    # 播放生成的音频
+                    # 加载音频文件，等待用户点击播放
                     self.playerCard.play_audio(audio_path)
-                    InfoBar.success(title='成功', content=f"音频已生成并开始播放: {os.path.basename(audio_path)}", parent=self)
+                    InfoBar.success(title='成功', content=f"音频已生成: {os.path.basename(audio_path)}，点击播放按钮开始播放", parent=self)
                 else:
                     InfoBar.warning(title='警告', content="音频文件未找到或路径无效", parent=self)
             else:
@@ -567,6 +644,10 @@ class SynthesisInterface(ScrollArea):
 
     def __toggle_server(self):
         if self.serverProcess.state() == QProcess.NotRunning:
+            # 显示进度条
+            self.serverProgressBar.setVisible(True)
+            self.serverProgressBar.start()
+            
             self.startServerBtn.setEnabled(False)
             self.startServerBtn.setText("启动中...")
             self.serverLogCard.append_log("[系统] 正在初始化推理服务器...")
@@ -586,6 +667,8 @@ class SynthesisInterface(ScrollArea):
 
             if not os.path.exists(env_python) or not os.path.exists(script_path):
                 self.serverLogCard.append_log("[错误] 找不到 voxcpm2_env 或 inference_server.py，请检查路径。")
+                self.serverProgressBar.stop()
+                self.serverProgressBar.setVisible(False)
                 self.startServerBtn.setEnabled(True)
                 self.startServerBtn.setText("启动服务")
                 return
@@ -594,6 +677,10 @@ class SynthesisInterface(ScrollArea):
             # 启动进程
             self.serverProcess.start(env_python, [script_path])
         else:
+            # 隐藏进度条
+            self.serverProgressBar.stop()
+            self.serverProgressBar.setVisible(False)
+            
             self.serverProcess.terminate()
             self.serverLogCard.append_log("[系统] 正在请求停止服务器...")
             self.startServerBtn.setEnabled(False)
@@ -614,8 +701,12 @@ class SynthesisInterface(ScrollArea):
                         
                         # 状态识别逻辑 (对齐原始 GUI 的启动成功标志)
                         if "Uvicorn running on" in line or "Application startup complete" in line:
+                            # 隐藏进度条
+                            self.serverProgressBar.stop()
+                            self.serverProgressBar.setVisible(False)
+                            
                             self.statusIndicator.setText("● 在线")
-                            self.statusIndicator.setStyleSheet("color: #107C10;") # Fluent Green
+                            self.statusIndicator.setStyleSheet("color: #107C10; font-size: 14px;")
                             self.startServerBtn.setText("停止服务")
                             self.startServerBtn.setIcon(FIF.CANCEL)
                             self.startServerBtn.setEnabled(True)
@@ -624,8 +715,12 @@ class SynthesisInterface(ScrollArea):
             self.serverLogCard.append_log(f"[错误] 日志读取异常: {str(e)}")
 
     def __on_server_finished(self, code):
+        # 隐藏进度条
+        self.serverProgressBar.stop()
+        self.serverProgressBar.setVisible(False)
+        
         self.statusIndicator.setText("● 离线")
-        self.statusIndicator.setStyleSheet("color: gray;")
+        self.statusIndicator.setStyleSheet("color: #808080; font-size: 14px;")
         self.startServerBtn.setText("启动服务")
         self.startServerBtn.setIcon(FIF.PLAY)
         self.startServerBtn.setEnabled(True)
