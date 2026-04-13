@@ -10,7 +10,6 @@ from qfluentwidgets import FluentIcon as FIF
 from app.common.config import cfg
 from app.common.signal_bus import signalBus
 from app.view.synthesis_interface import SynthesisInterface
-from app.view.logs_interface import LogsInterface
 from app.view.setting_interface import SettingInterface
 
 
@@ -25,7 +24,6 @@ class MainWindow(FluentWindow):
 
         # create sub interface
         self.synthesisInterface = SynthesisInterface(self)
-        self.logsInterface = LogsInterface(self)
         self.settingInterface = SettingInterface(self)
 
         # enable acrylic effect
@@ -46,7 +44,6 @@ class MainWindow(FluentWindow):
     def initNavigation(self):
         # add navigation items
         self.addSubInterface(self.synthesisInterface, FIF.MUSIC, "语音合成")
-        self.addSubInterface(self.logsInterface, FIF.CHAT, "服务器日志")
         
         self.addSubInterface(
             self.settingInterface, FIF.SETTING, "设置", NavigationItemPosition.BOTTOM)

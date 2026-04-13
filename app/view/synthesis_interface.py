@@ -6,9 +6,10 @@ import os
 from pathlib import Path
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, 
                              QLabel, QSizePolicy, QToolTip)
-from PyQt5.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaContent
+from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from qfluentwidgets import (ScrollArea, CardWidget, TitleLabel, CaptionLabel, 
-                            TextEdit, Slider, SwitchButton, PrimaryPushButton, PushButton,
+                            TextEdit, PlainTextEdit, Slider, SwitchButton, PrimaryPushButton, PushButton,
                             FluentIcon as FIF, InfoBar, InfoBarPosition, TransparentToolButton,
                             BodyLabel, StrongBodyLabel, ProgressRing, ToolTipFilter,
                             IndeterminateProgressBar, isDarkTheme, qconfig)
@@ -263,7 +264,7 @@ class ServerLogCard(CardWidget):
         headerLayout.addStretch()
         headerLayout.addWidget(self.clearBtn)
 
-        self.logArea = TextEdit()
+        self.logArea = TextEdit()  # 使用TextEdit而不是PlainTextEdit，因为需要append方法
         self.logArea.setReadOnly(True)
         self.logArea.setMaximumHeight(200)
         # 移除硬编码样式，使用 qfluentwidgets 默认样式以适配主题
@@ -403,7 +404,7 @@ class SynthesisInterface(ScrollArea):
         refLayout.addLayout(uploadLayout)
         
         # ASR 文本输入框 (始终显示)
-        self.asrInput = TextEdit()
+        self.asrInput = PlainTextEdit()
         self.asrInput.setPlaceholderText("参考音频对应的文本内容（用于声音克隆）...")
         self.asrInput.setMaximumHeight(60)
         refLayout.addWidget(self.asrInput)
@@ -417,7 +418,7 @@ class SynthesisInterface(ScrollArea):
         promptLayout.setSpacing(8)
         
         promptTitle = StrongBodyLabel("控制指令（可选）")
-        self.promptInput = TextEdit()
+        self.promptInput = PlainTextEdit()
         self.promptInput.setPlaceholderText("如：年轻女性，温柔甜美 / A warm young woman")
         # 移除最大高度限制，让其占据左侧剩余空间
         self.promptInput.setToolTip("通过文字描述生成目标音色，无需参考音频")
@@ -480,7 +481,7 @@ class SynthesisInterface(ScrollArea):
         textLayout.setSpacing(8)
         
         textTitle = StrongBodyLabel("目标文本")
-        self.textInput = TextEdit()
+        self.textInput = PlainTextEdit()  # 使用PlainTextEdit来过滤粘贴格式
         self.textInput.setPlaceholderText("请输入要合成的内容...")
         
         textLayout.addWidget(textTitle)
@@ -598,6 +599,23 @@ class SynthesisInterface(ScrollArea):
         self.generateBtn.setText("推理中...")
         self.generateBtn.setToolTip("推理任务正在进行，请耐心等待完成")
         
+        # 确定输出目录 - 始终使用 VoxCPM2 根目录下的 outputs 文件夹
+        import sys
+        import os
+        from pathlib import Path
+        
+        if getattr(sys, 'frozen', False):
+            # 如果是打包的exe文件，使用exe所在目录
+            voxcpm2_root = os.path.dirname(sys.executable)
+        else:
+            # 如果是源代码运行，向上查找直到找到 VoxCPM2 根目录
+            current_dir = Path(__file__).resolve()
+            # 从 synthesis_interface.py 向上查找: view -> app -> voxcpm-fluent-gui -> VoxCPM2
+            voxcpm2_root = current_dir.parent.parent.parent.parent
+        
+        output_dir = str(voxcpm2_root / "outputs")
+        os.makedirs(output_dir, exist_ok=True)
+        
         # 构造请求数据
         payload = {
             "text": text,
@@ -606,7 +624,7 @@ class SynthesisInterface(ScrollArea):
             "prompt_text": self.asrInput.toPlainText().strip() if self.ultimateSwitch.isChecked() else None,  # ASR文本作为prompt_text
             "cfg_value": self.cfgSlider.value() / 10.0,  # 修正字段名
             "inference_timesteps": self.stepsSlider.value(),  # 修正字段名
-            "output_dir": str(Path(__file__).parent.parent.parent / "outputs")  # 指定输出目录
+            "output_dir": output_dir  # 指定输出目录为 VoxCPM2 根目录下的 outputs
         }
 
         request = QNetworkRequest(QUrl(f"{self.server_url}/generate"))
@@ -631,13 +649,20 @@ class SynthesisInterface(ScrollArea):
                 if audio_path and os.path.exists(audio_path):
                     # 加载音频文件，等待用户点击播放
                     self.playerCard.play_audio(audio_path)
-                    InfoBar.success(
+                    
+                    # 创建自定义的成功提示，从底部弹出，不自动消失，包含打开文件夹按钮
+                    info_bar = InfoBar.success(
                         title='成功', 
-                        content=f"音频已生成: {os.path.basename(audio_path)}，点击播放按钮开始播放", 
+                        content=f"音频已生成: {os.path.basename(audio_path)}", 
                         parent=self,
-                        position=InfoBarPosition.TOP,
-                        duration=3000
+                        position=InfoBarPosition.BOTTOM,
+                        duration=-1  # 不自动消失
                     )
+                    
+                    # 添加打开文件夹按钮
+                    open_folder_btn = PushButton("打开文件夹")
+                    open_folder_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(audio_path))))
+                    info_bar.addWidget(open_folder_btn)
                 else:
                     InfoBar.warning(
                         title='警告', 
