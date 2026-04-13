@@ -5,14 +5,14 @@ import json
 import os
 from pathlib import Path
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, 
-                             QLabel, QSizePolicy, QToolTip)
+                             QLabel, QSizePolicy, QToolTip, QGridLayout)
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from qfluentwidgets import (ScrollArea, CardWidget, TitleLabel, CaptionLabel, 
                             TextEdit, PlainTextEdit, Slider, SwitchButton, PrimaryPushButton, PushButton,
                             FluentIcon as FIF, InfoBar, InfoBarPosition, TransparentToolButton,
                             BodyLabel, StrongBodyLabel, ProgressRing, ToolTipFilter,
-                            IndeterminateProgressBar, isDarkTheme, qconfig)
+                            IndeterminateProgressBar, isDarkTheme, qconfig, PillPushButton)
 
 from app.common.style_sheet import StyleSheet
 
@@ -420,15 +420,58 @@ class SynthesisInterface(ScrollArea):
         promptTitle = StrongBodyLabel("控制指令（可选）")
         self.promptInput = PlainTextEdit()
         self.promptInput.setPlaceholderText("如：年轻女性，温柔甜美 / A warm young woman")
-        # 移除最大高度限制，让其占据左侧剩余空间
+        self.promptInput.setMaximumHeight(60)  # 限制为最多两行文本高度
         self.promptInput.setToolTip("通过文字描述生成目标音色，无需参考音频")
         self.promptInput.installEventFilter(ToolTipFilter(self.promptInput))
         
         # 增加禁用态提示支持：通过临时替换文本实现
         self.promptOriginalText = ""
+        # 添加选中的标签集合
+        self.selected_tags = set()
         
         promptLayout.addWidget(promptTitle)
-        promptLayout.addWidget(self.promptInput, 1) # 1 表示占据剩余垂直空间
+        promptLayout.addWidget(self.promptInput)
+        
+        # 添加快捷标签按钮组 - 使用网格布局 (3x3)
+        tagsLayout = QGridLayout()
+        tagsLayout.setSpacing(8)
+        
+        # 基础音色标签
+        self.tagYoungFemale = PillPushButton("年轻女性，温柔甜美")
+        self.tagMatureMale = PillPushButton("成熟男性，沉稳有力") 
+        self.tagChildVoice = PillPushButton("儿童声音，活泼可爱")
+        
+        # 情感风格标签
+        self.tagCheerful = PillPushButton("更欢快、语速稍快")
+        self.tagSerious = PillPushButton("严肃认真，语速适中")
+        self.tagGentle = PillPushButton("温柔舒缓，轻声细语")
+        
+        # 方言特色标签
+        self.tagNortheast = PillPushButton("东北话")
+        self.tagSichuan = PillPushButton("四川话")
+        
+        # 连接按钮点击事件 - 添加/移除文本模式
+        self.tagYoungFemale.clicked.connect(lambda: self.__toggle_prompt_text("年轻女性，温柔甜美"))
+        self.tagMatureMale.clicked.connect(lambda: self.__toggle_prompt_text("成熟男性，沉稳有力"))
+        self.tagChildVoice.clicked.connect(lambda: self.__toggle_prompt_text("儿童声音，活泼可爱"))
+        self.tagCheerful.clicked.connect(lambda: self.__toggle_prompt_text("更欢快、语速稍快"))
+        self.tagSerious.clicked.connect(lambda: self.__toggle_prompt_text("严肃认真，语速适中"))
+        self.tagGentle.clicked.connect(lambda: self.__toggle_prompt_text("温柔舒缓，轻声细语"))
+        self.tagNortheast.clicked.connect(lambda: self.__toggle_prompt_text("东北话"))
+        self.tagSichuan.clicked.connect(lambda: self.__toggle_prompt_text("四川话"))
+        
+        # 添加标签到网格布局 (3列布局)
+        tagsLayout.addWidget(self.tagYoungFemale, 0, 0)
+        tagsLayout.addWidget(self.tagMatureMale, 0, 1)
+        tagsLayout.addWidget(self.tagChildVoice, 0, 2)
+        tagsLayout.addWidget(self.tagCheerful, 1, 0)
+        tagsLayout.addWidget(self.tagSerious, 1, 1)
+        tagsLayout.addWidget(self.tagGentle, 1, 2)
+        tagsLayout.addWidget(self.tagNortheast, 2, 0)
+        tagsLayout.addWidget(self.tagSichuan, 2, 1)
+        # 第2行第2列留空以保持平衡
+        
+        promptLayout.addLayout(tagsLayout)
 
         leftLayout.addWidget(self.serverCard)
         leftLayout.addWidget(refCard)
@@ -686,13 +729,13 @@ class SynthesisInterface(ScrollArea):
                     # 加载音频文件，等待用户点击播放
                     self.playerCard.play_audio(audio_path)
                     
-                    # 创建自定义的成功提示，从底部弹出，不自动消失，包含打开文件夹按钮
+                    # 创建自定义的成功提示，从底部弹出，10秒后自动消失，包含打开文件夹按钮
                     info_bar = InfoBar.success(
                         title='成功', 
                         content=f"音频已生成: {os.path.basename(audio_path)}", 
                         parent=self,
                         position=InfoBarPosition.BOTTOM,
-                        duration=-1  # 不自动消失
+                        duration=10000  # 10秒后自动消失
                     )
                     
                     # 添加打开文件夹按钮
@@ -729,8 +772,12 @@ class SynthesisInterface(ScrollArea):
 
     def __onUltimateModeChanged(self, checked):
         if checked:
-            # 保存原文本并替换为提示
+            # 保存原文本和选中状态
             self.promptOriginalText = self.promptInput.toPlainText()
+            # 从原文本重建选中状态（用于手动输入的情况）
+            if self.promptOriginalText and self.promptOriginalText != "极致克隆模式下不可使用控制指令":
+                # 如果有手动输入的文本，保持原样，不清空选中状态
+                pass
             self.promptInput.setPlainText("极致克隆模式下不可使用控制指令")
             self.promptInput.setEnabled(False)
             
@@ -741,8 +788,40 @@ class SynthesisInterface(ScrollArea):
             self.promptInput.setPlainText(self.promptOriginalText)
             self.promptInput.setEnabled(True)
             
+            # 如果恢复的是通过标签设置的文本，重建选中状态
+            if self.promptOriginalText and self.promptOriginalText != "极致克隆模式下不可使用控制指令":
+                # 尝试从文本重建选中状态（仅当文本是由标签生成的）
+                possible_tags = {
+                    "年轻女性，温柔甜美", "成熟男性，沉稳有力", "儿童声音，活泼可爱",
+                    "更欢快、语速稍快", "严肃认真，语速适中", "温柔舒缓，轻声细语",
+                    "东北话", "四川话"
+                }
+                current_fragments = [frag.strip() for frag in self.promptOriginalText.split('，') if frag.strip()]
+                self.selected_tags = set()
+                for frag in current_fragments:
+                    if frag in possible_tags:
+                        self.selected_tags.add(frag)
+            
             # 恢复普通模式提示
             self.asrInput.setPlaceholderText("参考音频对应的文本内容（用于声音克隆）...")
+
+    def __toggle_prompt_text(self, text):
+        """切换控制指令文本（添加或移除指定文本片段）"""
+        target_text = text.strip()
+        
+        # 切换选中状态
+        if target_text in self.selected_tags:
+            self.selected_tags.remove(target_text)
+        else:
+            self.selected_tags.add(target_text)
+        
+        # 重新组合文本
+        if self.selected_tags:
+            new_text = '，'.join(sorted(self.selected_tags))  # 排序以保持一致性
+        else:
+            new_text = ''
+        
+        self.promptInput.setPlainText(new_text)
 
     def __toggle_server(self):
         if self.serverProcess.state() == QProcess.NotRunning:
