@@ -430,38 +430,6 @@ class SynthesisInterface(ScrollArea):
         promptLayout.addWidget(promptTitle)
         promptLayout.addWidget(self.promptInput, 1) # 1 表示占据剩余垂直空间
 
-        # 4. 高级设置卡
-        advCard = CardWidget()
-        advLayout = QVBoxLayout(advCard)
-        advLayout.setContentsMargins(16, 12, 16, 12)
-        advLayout.setSpacing(8)
-        
-        advTitle = StrongBodyLabel("高级设置")
-        
-        # CFG 滑块
-        self.cfgLabel = CaptionLabel("CFG（引导强度）: 2.0")
-        self.cfgSlider = Slider(Qt.Horizontal)
-        self.cfgSlider.setRange(5, 50)
-        self.cfgSlider.setValue(20)
-        self.cfgSlider.setToolTip("值越高越遵循控制指令，但可能影响自然度（推荐 1.5-3.0）")
-        self.cfgSlider.installEventFilter(ToolTipFilter(self.cfgSlider))
-        self.cfgSlider.valueChanged.connect(lambda v: self.cfgLabel.setText(f"CFG（引导强度）: {v/10:.1f}"))
-        
-        # 步数滑块
-        self.stepsLabel = CaptionLabel("推理步数: 10")
-        self.stepsSlider = Slider(Qt.Horizontal)
-        self.stepsSlider.setRange(5, 30)
-        self.stepsSlider.setValue(10)
-        self.stepsSlider.setToolTip("步数越多质量越高，但速度越慢（推荐 10-15）")
-        self.stepsSlider.installEventFilter(ToolTipFilter(self.stepsSlider))
-        self.stepsSlider.valueChanged.connect(lambda v: self.stepsLabel.setText(f"推理步数: {v}"))
-        
-        advLayout.addWidget(advTitle)
-        advLayout.addWidget(self.cfgLabel)
-        advLayout.addWidget(self.cfgSlider)
-        advLayout.addWidget(self.stepsLabel)
-        advLayout.addWidget(self.stepsSlider)
-
         leftLayout.addWidget(self.serverCard)
         leftLayout.addWidget(refCard)
         leftLayout.addWidget(promptCard)
@@ -483,6 +451,8 @@ class SynthesisInterface(ScrollArea):
         textTitle = StrongBodyLabel("目标文本")
         self.textInput = PlainTextEdit()  # 使用PlainTextEdit来过滤粘贴格式
         self.textInput.setPlaceholderText("请输入要合成的内容...")
+        # 设置文本输入框的最小高度，使其与服务器卡片的日志区域高度匹配
+        self.textInput.setMinimumHeight(120)
         
         textLayout.addWidget(textTitle)
         textLayout.addWidget(self.textInput)
@@ -491,11 +461,19 @@ class SynthesisInterface(ScrollArea):
         advCard = CardWidget()
         advLayout = QVBoxLayout(advCard)
         advLayout.setContentsMargins(16, 12, 16, 12)
-        advLayout.setSpacing(8)
+        advLayout.setSpacing(12)
         
         advTitle = StrongBodyLabel("高级设置")
         
-        # CFG 滑块
+        # CFG 和步数设置 - 水平布局
+        cfgStepsLayout = QHBoxLayout()
+        cfgStepsLayout.setSpacing(16)
+        
+        # CFG 设置
+        cfgGroup = QWidget()
+        cfgLayout = QVBoxLayout(cfgGroup)
+        cfgLayout.setContentsMargins(0, 0, 0, 0)
+        cfgLayout.setSpacing(4)
         self.cfgLabel = CaptionLabel("CFG（引导强度）: 2.0")
         self.cfgSlider = Slider(Qt.Horizontal)
         self.cfgSlider.setRange(5, 50)
@@ -503,8 +481,14 @@ class SynthesisInterface(ScrollArea):
         self.cfgSlider.setToolTip("值越高越遵循控制指令，但可能影响自然度（推荐 1.5-3.0）")
         self.cfgSlider.installEventFilter(ToolTipFilter(self.cfgSlider))
         self.cfgSlider.valueChanged.connect(lambda v: self.cfgLabel.setText(f"CFG（引导强度）: {v/10:.1f}"))
+        cfgLayout.addWidget(self.cfgLabel)
+        cfgLayout.addWidget(self.cfgSlider)
         
-        # 步数滑块
+        # 步数设置
+        stepsGroup = QWidget()
+        stepsLayout = QVBoxLayout(stepsGroup)
+        stepsLayout.setContentsMargins(0, 0, 0, 0)
+        stepsLayout.setSpacing(4)
         self.stepsLabel = CaptionLabel("推理步数: 10")
         self.stepsSlider = Slider(Qt.Horizontal)
         self.stepsSlider.setRange(5, 30)
@@ -512,12 +496,51 @@ class SynthesisInterface(ScrollArea):
         self.stepsSlider.setToolTip("步数越多质量越高，但速度越慢（推荐 10-15）")
         self.stepsSlider.installEventFilter(ToolTipFilter(self.stepsSlider))
         self.stepsSlider.valueChanged.connect(lambda v: self.stepsLabel.setText(f"推理步数: {v}"))
+        stepsLayout.addWidget(self.stepsLabel)
+        stepsLayout.addWidget(self.stepsSlider)
+        
+        cfgStepsLayout.addWidget(cfgGroup, 1)
+        cfgStepsLayout.addWidget(stepsGroup, 1)
+        
+        # 开关设置 - 水平布局
+        switchesLayout = QHBoxLayout()
+        switchesLayout.setSpacing(24)
+        
+        # 音频降噪开关
+        denoiseLayout = QHBoxLayout()
+        denoiseLayout.setSpacing(8)
+        self.denoiseSwitch = SwitchButton()
+        self.denoiseSwitch.setOnText("开启")
+        self.denoiseSwitch.setOffText("关闭")
+        self.denoiseSwitch.setChecked(False)  # 默认关闭
+        self.denoiseSwitch.setToolTip("开启音频降噪以提高参考音频质量")
+        self.denoiseSwitch.installEventFilter(ToolTipFilter(self.denoiseSwitch))
+        denoiseLabel = CaptionLabel("音频降噪")
+        denoiseLayout.addWidget(self.denoiseSwitch)
+        denoiseLayout.addWidget(denoiseLabel)
+        denoiseLayout.addStretch()
+        
+        # 文本正规范化开关
+        normalizeLayout = QHBoxLayout()
+        normalizeLayout.setSpacing(8)
+        self.normalizeSwitch = SwitchButton()
+        self.normalizeSwitch.setOnText("开启")
+        self.normalizeSwitch.setOffText("关闭")
+        self.normalizeSwitch.setChecked(True)  # 默认开启
+        self.normalizeSwitch.setToolTip("开启文本正规范化以标准化输入文本格式")
+        self.normalizeSwitch.installEventFilter(ToolTipFilter(self.normalizeSwitch))
+        normalizeLabel = CaptionLabel("文本正规范化")
+        normalizeLayout.addWidget(self.normalizeSwitch)
+        normalizeLayout.addWidget(normalizeLabel)
+        normalizeLayout.addStretch()
+        
+        switchesLayout.addLayout(denoiseLayout)
+        switchesLayout.addLayout(normalizeLayout)
+        switchesLayout.addStretch()
         
         advLayout.addWidget(advTitle)
-        advLayout.addWidget(self.cfgLabel)
-        advLayout.addWidget(self.cfgSlider)
-        advLayout.addWidget(self.stepsLabel)
-        advLayout.addWidget(self.stepsSlider)
+        advLayout.addLayout(cfgStepsLayout)
+        advLayout.addLayout(switchesLayout)
 
         # 3. 生成按钮
         self.generateBtn = PrimaryPushButton(FIF.PLAY, "开始生成")
@@ -580,6 +603,17 @@ class SynthesisInterface(ScrollArea):
             )
             return
         
+        # 获取控制指令（仅在非极致克隆模式下使用）
+        control_prompt = ""
+        if not self.ultimateSwitch.isChecked():
+            control_prompt = self.promptInput.toPlainText().strip()
+        
+        # 构建最终文本（模仿官方CLI的做法：用括号包裹控制指令）
+        if control_prompt:
+            final_text = f"({control_prompt}){text}"
+        else:
+            final_text = text
+        
         # 检查服务器状态
         if self.serverProcess.state() == QProcess.NotRunning:
             InfoBar.warning(
@@ -618,13 +652,15 @@ class SynthesisInterface(ScrollArea):
         
         # 构造请求数据
         payload = {
-            "text": text,
+            "text": final_text,  # 使用合并后的最终文本
             "reference_wav_path": getattr(self, 'ref_audio_path', None),  # 修正字段名以匹配服务器
             "prompt_wav_path": getattr(self, 'ref_audio_path', None) if self.ultimateSwitch.isChecked() else None,  # 极致克隆模式
             "prompt_text": self.asrInput.toPlainText().strip() if self.ultimateSwitch.isChecked() else None,  # ASR文本作为prompt_text
             "cfg_value": self.cfgSlider.value() / 10.0,  # 修正字段名
             "inference_timesteps": self.stepsSlider.value(),  # 修正字段名
-            "output_dir": output_dir  # 指定输出目录为 VoxCPM2 根目录下的 outputs
+            "output_dir": output_dir,  # 指定输出目录为 VoxCPM2 根目录下的 outputs
+            "denoise_enabled": self.denoiseSwitch.isChecked(),  # 音频降噪开关
+            "normalize_text": self.normalizeSwitch.isChecked()  # 文本正规范化开关
         }
 
         request = QNetworkRequest(QUrl(f"{self.server_url}/generate"))
@@ -734,9 +770,9 @@ class SynthesisInterface(ScrollArea):
                 env_python = "h:/VoxCPM2/voxcpm2_env/python.exe"
             
             # 2. 确定脚本路径
-            script_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "voxcpm-gui", "inference_server.py")
+            script_path = os.path.join(os.path.dirname(__file__), "..", "..", "inference_server.py")
             if not os.path.exists(script_path):
-                script_path = "h:/VoxCPM2/voxcpm-gui/inference_server.py"
+                script_path = "h:/VoxCPM2/voxcpm-fluent-gui/inference_server.py"
 
             if not os.path.exists(env_python) or not os.path.exists(script_path):
                 self.serverLogCard.append_log("[错误] 找不到 voxcpm2_env 或 inference_server.py，请检查路径。")
