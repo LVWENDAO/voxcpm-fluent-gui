@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/qss">
+        <file alias="light/home_interface.qss">assets/qss/light/home_interface.qss</file>
+        <file alias="dark/home_interface.qss">assets/qss/dark/home_interface.qss</file>
+        <file alias="light/synthesis_interface.qss">assets/qss/light/synthesis_interface.qss</file>
+        <file alias="dark/synthesis_interface.qss">assets/qss/dark/synthesis_interface.qss</file>
+        <file alias="light/logs_interface.qss">assets/qss/light/logs_interface.qss</file>
+        <file alias="dark/logs_interface.qss">assets/qss/dark/logs_interface.qss</file>
+        <file alias="light/setting_interface.qss">assets/qss/light/setting_interface.qss</file>
+        <file alias="dark/setting_interface.qss">assets/qss/dark/setting_interface.qss</file>
+    </qresource>
+</RCC>
