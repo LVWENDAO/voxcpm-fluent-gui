@@ -714,9 +714,16 @@ class SynthesisInterface(ScrollArea):
             self.serverProgressBar.setVisible(True)
             self.serverProgressBar.start()
             
+            # 禁用生成按钮（防止在服务器启动过程中发送请求）
+            self.generateBtn.setEnabled(False)
+            self.generateBtn.setToolTip("服务器启动中，请等待...")
+            
             self.startServerBtn.setEnabled(False)
             self.startServerBtn.setText("启动中...")
             self.serverLogCard.append_log("[系统] 正在初始化推理服务器...")
+            
+            # 检查并清理占用8000端口的残留进程
+            self.__cleanup_port_8000()
             
             # 定位 voxcpm2_env 环境下的 Python 解释器和 inference_server.py
             import os, sys
@@ -751,6 +758,143 @@ class SynthesisInterface(ScrollArea):
             self.serverLogCard.append_log("[系统] 正在请求停止服务器...")
             self.startServerBtn.setEnabled(False)
             self.startServerBtn.setText("停止中...")
+
+    def __cleanup_port_8000(self):
+        """优雅地清理占用8000端口的残留VoxCPM2进程"""
+        try:
+            import subprocess
+            import os
+            
+            # 获取占用8000端口的进程ID
+            result = subprocess.run(
+                ['netstat', '-ano'], 
+                capture_output=True, 
+                text=True, 
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            if result.returncode != 0:
+                return
+                
+            lines = result.stdout.split('\n')
+            target_pid = None
+            
+            for line in lines:
+                if ':8000' in line and 'LISTENING' in line:
+                    parts = line.strip().split()
+                    if len(parts) >= 5:
+                        target_pid = parts[4]
+                        break
+            
+            if not target_pid or not target_pid.isdigit():
+                return
+                
+            pid = int(target_pid)
+            
+            # 第一层：精准匹配 - 检查是否是VoxCPM2相关的python进程
+            is_voxcpm2_process = False
+            process_name = ""
+            
+            try:
+                # 获取进程详细信息
+                process_info = subprocess.run(
+                    ['tasklist', '/fi', f'PID eq {pid}', '/fo', 'CSV', '/nh'],
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                
+                if process_info.returncode == 0 and process_info.stdout.strip():
+                    info_parts = process_info.stdout.strip().strip('"').split('","')
+                    if len(info_parts) >= 1:
+                        process_name = info_parts[0].lower()
+                        
+                    # 检查进程路径
+                    path_result = subprocess.run(
+                        ['wmic', 'process', 'where', f'ProcessId={pid}', 'get', 'ExecutablePath', '/value'],
+                        capture_output=True,
+                        text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    
+                    if path_result.returncode == 0:
+                        # 解析WMIC输出 (格式: ExecutablePath=C:\path\to\exe)
+                        for line in path_result.stdout.split('\n'):
+                            if line.strip().startswith('ExecutablePath='):
+                                exe_path = line.strip().split('=', 1)[1]
+                                if exe_path and ('voxcpm2_env' in exe_path.lower() or 'voxcpm' in exe_path.lower()):
+                                    is_voxcpm2_process = True
+                                    break
+                    
+                    # 如果路径匹配失败，但确定是python进程且占用大量内存（>1GB），也认为是VoxCPM2进程
+                    if not is_voxcpm2_process and 'python' in process_name:
+                        if len(info_parts) >= 5:
+                            try:
+                                memory_kb = int(info_parts[4].replace(',', ''))
+                                if memory_kb > 1024 * 1024:  # > 1GB
+                                    is_voxcpm2_process = True
+                            except ValueError:
+                                pass
+            
+            except Exception as e:
+                self.serverLogCard.append_log(f"[系统] 获取进程详细信息时发生错误: {str(e)}")
+            
+            # 执行清理
+            if is_voxcpm2_process:
+                try:
+                    subprocess.run(
+                        ['taskkill', '/pid', str(pid), '/f'],
+                        capture_output=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    self.serverLogCard.append_log(f"[系统] 已清理VoxCPM2残留进程 PID: {pid}")
+                    
+                    # 弹出成功提醒
+                    InfoBar.success(
+                        title='清理完成',
+                        content=f'已自动清理占用端口8000的残留进程 (PID: {pid})',
+                        parent=self,
+                        position=InfoBarPosition.TOP,
+                        duration=2000
+                    )
+                    
+                except Exception as e:
+                    error_msg = f"[系统] 清理进程 {pid} 失败: {str(e)}"
+                    self.serverLogCard.append_log(error_msg)
+                    
+                    # 弹出错误提醒
+                    InfoBar.error(
+                        title='清理失败',
+                        content='无法自动清理残留进程，请手动关闭相关程序',
+                        parent=self,
+                        position=InfoBarPosition.TOP,
+                        duration=3000
+                    )
+            else:
+                # 不是VoxCPM2进程，但端口被占用
+                warning_msg = f"[系统] 端口8000被其他进程占用 (PID: {pid}, 名称: {process_name})"
+                self.serverLogCard.append_log(warning_msg)
+                
+                # 弹出警告提醒
+                InfoBar.warning(
+                    title='端口冲突',
+                    content='端口8000已被其他程序占用，请关闭相关程序后重试',
+                    parent=self,
+                    position=InfoBarPosition.TOP,
+                    duration=4000
+                )
+                    
+        except Exception as e:
+            error_msg = f"[系统] 检测端口占用时发生错误: {str(e)}"
+            self.serverLogCard.append_log(error_msg)
+            
+            InfoBar.error(
+                title='检测失败',
+                content='无法检测端口占用状态',
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=3000
+            )
 
     def __on_server_output(self):
         try:
@@ -808,51 +952,3 @@ class SynthesisInterface(ScrollArea):
         # 禁用生成按钮
         self.generateBtn.setEnabled(False)
         self.generateBtn.setToolTip("请先启动推理服务器")
-
-    def __toggle_server(self):
-        if self.serverProcess.state() == QProcess.NotRunning:
-            # 显示进度条
-            self.serverProgressBar.setVisible(True)
-            self.serverProgressBar.start()
-            
-            # 禁用生成按钮（防止在服务器启动过程中发送请求）
-            self.generateBtn.setEnabled(False)
-            self.generateBtn.setToolTip("服务器启动中，请等待...")
-            
-            self.startServerBtn.setEnabled(False)
-            self.startServerBtn.setText("启动中...")
-            self.serverLogCard.append_log("[系统] 正在初始化推理服务器...")
-            
-            # 定位 voxcpm2_env 环境下的 Python 解释器和 inference_server.py
-            import os, sys
-            
-            # 1. 确定 Python 解释器路径 (优先使用 voxcpm2_env)
-            env_python = os.path.join(os.path.dirname(__file__), "..", "..", "..", "voxcpm2_env", "python.exe")
-            if not os.path.exists(env_python):
-                env_python = "h:/VoxCPM2/voxcpm2_env/python.exe"
-            
-            # 2. 确定脚本路径
-            script_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "voxcpm-gui", "inference_server.py")
-            if not os.path.exists(script_path):
-                script_path = "h:/VoxCPM2/voxcpm-gui/inference_server.py"
-
-            if not os.path.exists(env_python) or not os.path.exists(script_path):
-                self.serverLogCard.append_log("[错误] 找不到 voxcpm2_env 或 inference_server.py，请检查路径。")
-                self.serverProgressBar.stop()
-                self.serverProgressBar.setVisible(False)
-                self.startServerBtn.setEnabled(True)
-                self.startServerBtn.setText("启动服务")
-                return
-
-            self.serverLogCard.append_log(f"[系统] 使用环境: {env_python}")
-            # 启动进程
-            self.serverProcess.start(env_python, [script_path])
-        else:
-            # 隐藏进度条
-            self.serverProgressBar.stop()
-            self.serverProgressBar.setVisible(False)
-            
-            self.serverProcess.terminate()
-            self.serverLogCard.append_log("[系统] 正在请求停止服务器...")
-            self.startServerBtn.setEnabled(False)
-            self.startServerBtn.setText("停止中...")
