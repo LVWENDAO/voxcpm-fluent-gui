@@ -9,7 +9,6 @@ from qfluentwidgets import FluentIcon as FIF
 
 from app.common.config import cfg
 from app.common.signal_bus import signalBus
-from app.view.home_interface import HomeInterface
 from app.view.synthesis_interface import SynthesisInterface
 from app.view.logs_interface import LogsInterface
 from app.view.setting_interface import SettingInterface
@@ -25,7 +24,6 @@ class MainWindow(FluentWindow):
         self.themeListener = SystemThemeListener(self)
 
         # create sub interface
-        self.homeInterface = HomeInterface(self)
         self.synthesisInterface = SynthesisInterface(self)
         self.logsInterface = LogsInterface(self)
         self.settingInterface = SettingInterface(self)
@@ -47,7 +45,6 @@ class MainWindow(FluentWindow):
 
     def initNavigation(self):
         # add navigation items
-        self.addSubInterface(self.homeInterface, FIF.HOME, "首页")
         self.addSubInterface(self.synthesisInterface, FIF.MUSIC, "语音合成")
         self.addSubInterface(self.logsInterface, FIF.CHAT, "服务器日志")
         

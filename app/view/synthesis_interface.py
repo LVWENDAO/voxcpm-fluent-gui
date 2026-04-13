@@ -1,9 +1,253 @@
 # coding:utf-8
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt5.QtCore import Qt, QUrl, QObject, QEvent, QProcess, QTimer
+from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
+import json
+import os
+from pathlib import Path
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, 
+                             QLabel, QSizePolicy, QToolTip)
+from PyQt5.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaContent
+from qfluentwidgets import (ScrollArea, CardWidget, TitleLabel, CaptionLabel, 
+                            TextEdit, Slider, SwitchButton, PrimaryPushButton, PushButton,
+                            FluentIcon as FIF, InfoBar, InfoBarPosition, TransparentToolButton,
+                            BodyLabel, StrongBodyLabel, ProgressRing, ToolTipFilter)
 
-from qfluentwidgets import ScrollArea
 from app.common.style_sheet import StyleSheet
+
+
+class AudioPlayerCard(CardWidget):
+    """对齐 voxcpm-gui 的音频播放卡片 - 优雅版"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(72) # 稍微调矮一点更显精致
+        
+        mainLayout = QHBoxLayout(self)
+        mainLayout.setContentsMargins(20, 12, 20, 12)
+        mainLayout.setSpacing(16)
+
+        # 1. 播放/暂停按钮 (使用 TransparentToolButton 确保图标完美居中)
+        self.playBtn = TransparentToolButton(FIF.PLAY)
+        self.playBtn.setFixedSize(40, 40)
+        self.playBtn.clicked.connect(self.toggle_play)
+
+        # 2. 右侧信息区 (进度条 + 时间)
+        infoWidget = QWidget()
+        infoLayout = QVBoxLayout(infoWidget)
+        infoLayout.setContentsMargins(0, 0, 0, 0)
+        infoLayout.setSpacing(4)
+
+        # 进度条
+        self.slider = Slider(Qt.Horizontal)
+        self.slider.setRange(0, 1000)
+        self.slider.setValue(0)
+        self.slider.sliderPressed.connect(self.on_slider_pressed)
+        self.slider.sliderReleased.connect(self.on_slider_released)
+        
+        # 时间显示行
+        timeLayout = QHBoxLayout()
+        timeLayout.setContentsMargins(4, 0, 4, 0)
+        self.currentTimeLabel = CaptionLabel("00:00")
+        self.totalTimeLabel = CaptionLabel("00:00")
+        self.statusLabel = CaptionLabel("等待生成...")
+        self.statusLabel.setStyleSheet("color: gray;")
+        timeLayout.addWidget(self.currentTimeLabel)
+        timeLayout.addStretch()
+        timeLayout.addWidget(self.statusLabel)
+        timeLayout.addWidget(self.totalTimeLabel)
+
+        infoLayout.addWidget(self.slider)
+        infoLayout.addLayout(timeLayout)
+
+        # 组装主布局
+        mainLayout.addWidget(self.playBtn)
+        mainLayout.addWidget(infoWidget, 1) # 1 表示占据剩余空间
+
+        # 初始化媒体播放器 (兼容旧版 API)
+        self.media_player = QMediaPlayer(self)
+        self.is_playing = False
+        self.duration = 0
+
+        # 绑定信号
+        self.media_player.durationChanged.connect(self.on_duration_changed)
+        self.media_player.positionChanged.connect(self.on_position_changed)
+
+    def toggle_play(self):
+        if self.media_player.state() == QMediaPlayer.PlayingState:
+            self.media_player.pause()
+            self.is_playing = False
+            self.playBtn.setIcon(FIF.PLAY)
+            self.statusLabel.setText("已暂停")
+        else:
+            if self.media_player.media().isNull():
+                return
+            self.media_player.play()
+            self.is_playing = True
+            self.playBtn.setIcon(FIF.PAUSE)
+            self.statusLabel.setText("正在播放...")
+
+    def play_audio(self, audio_path):
+        if not audio_path or not os.path.exists(audio_path):
+            return
+        media_content = QMediaContent(QUrl.fromLocalFile(audio_path))
+        self.media_player.setMedia(media_content)
+        self.media_player.play()
+        self.is_playing = True
+        self.playBtn.setIcon(FIF.PAUSE)
+        self.statusLabel.setText("正在播放...")
+
+    def on_slider_pressed(self):
+        pass
+
+    def on_slider_released(self):
+        if self.duration > 0:
+            pos = self.slider.value() / 1000.0 * self.duration
+            self.media_player.setPosition(int(pos))
+
+    def on_duration_changed(self, duration):
+        self.duration = duration
+        self.totalTimeLabel.setText(self.__format_time(duration))
+
+    def on_position_changed(self, position):
+        if not self.slider.isSliderDown() and self.duration > 0:
+            self.slider.setValue(int(position / self.duration * 1000))
+        self.currentTimeLabel.setText(self.__format_time(position))
+
+    def __format_time(self, ms):
+        seconds = int(ms / 1000)
+        minutes = seconds // 60
+        seconds %= 60
+        return f"{minutes:02d}:{seconds:02d}"
+
+
+class PerformanceMonitorCard(CardWidget):
+    """性能监视器卡片 - 图形化展示版"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(16)
+
+        title = StrongBodyLabel("性能监视器")
+        
+        # 监控项容器
+        monitorsLayout = QHBoxLayout()
+        monitorsLayout.setSpacing(20)
+
+        # 1. GPU 监控
+        self.gpuRing = ProgressRing()
+        self.gpuRing.setFixedSize(60, 60)
+        self.gpuRing.setTextVisible(True)
+        self.gpuInfo = CaptionLabel("GPU: --%")
+        gpuLayout = QVBoxLayout()
+        gpuLayout.setAlignment(Qt.AlignCenter)
+        gpuLayout.addWidget(self.gpuRing, 0, Qt.AlignHCenter)
+        gpuLayout.addWidget(self.gpuInfo, 0, Qt.AlignHCenter)
+        monitorsLayout.addLayout(gpuLayout)
+        monitorsLayout.addStretch(1) # 均分空间
+
+        # 2. 显存监控
+        self.vramRing = ProgressRing()
+        self.vramRing.setFixedSize(60, 60)
+        self.vramRing.setTextVisible(False)
+        self.vramInfo = CaptionLabel("显存: -- / -- GB")
+        vramLayout = QVBoxLayout()
+        vramLayout.setAlignment(Qt.AlignCenter)
+        vramLayout.addWidget(self.vramRing, 0, Qt.AlignHCenter)
+        vramLayout.addWidget(self.vramInfo, 0, Qt.AlignHCenter)
+        monitorsLayout.addLayout(vramLayout)
+        monitorsLayout.addStretch(1) # 均分空间
+
+        # 3. 内存监控
+        self.ramRing = ProgressRing()
+        self.ramRing.setFixedSize(60, 60)
+        self.ramRing.setTextVisible(False)
+        self.ramInfo = CaptionLabel("内存: -- / -- GB")
+        ramLayout = QVBoxLayout()
+        ramLayout.setAlignment(Qt.AlignCenter)
+        ramLayout.addWidget(self.ramRing, 0, Qt.AlignHCenter)
+        ramLayout.addWidget(self.ramInfo, 0, Qt.AlignHCenter)
+        monitorsLayout.addLayout(ramLayout)
+        monitorsLayout.addStretch(1) # 均分空间
+
+        layout.addWidget(title)
+        layout.addLayout(monitorsLayout)
+
+        # 模拟数据更新
+        from PyQt5.QtCore import QTimer
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.__update_stats)
+        self.timer.start(2000)
+
+    def __update_stats(self):
+        """更新真实性能监控数据"""
+        try:
+            import psutil
+            # 1. 内存监控
+            mem = psutil.virtual_memory()
+            ram_used = mem.used / (1024**3)
+            ram_total = mem.total / (1024**3)
+            self.ramRing.setValue(int(mem.percent))
+            self.ramInfo.setText(f"内存: {ram_used:.1f} / {ram_total:.1f} GB")
+
+            # 2. GPU 监控 (NVIDIA)
+            try:
+                import pynvml as nvml
+                nvml.nvmlInit()
+                handle = nvml.nvmlDeviceGetHandleByIndex(0)
+                
+                # 显存
+                info = nvml.nvmlDeviceGetMemoryInfo(handle)
+                vram_used = info.used / (1024**3)
+                vram_total = info.total / (1024**3)
+                self.vramRing.setValue(int((vram_used / vram_total) * 100))
+                self.vramInfo.setText(f"显存: {vram_used:.1f} / {vram_total:.1f} GB")
+                
+                # GPU 利用率
+                gpu_util = nvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                self.gpuRing.setValue(gpu_util)
+                self.gpuInfo.setText(f"GPU: {gpu_util}%")
+                
+                nvml.nvmlShutdown()
+            except Exception:
+                self.gpuInfo.setText("GPU: N/A")
+                self.vramInfo.setText("显存: N/A")
+        except ImportError:
+            self.ramInfo.setText("请安装 psutil")
+
+
+class ServerLogCard(CardWidget):
+    """服务器运行日志卡片"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
+
+        headerLayout = QHBoxLayout()
+        title = StrongBodyLabel("服务器日志")
+        self.clearBtn = TransparentToolButton(FIF.DELETE)
+        self.clearBtn.setFixedSize(32, 32)
+        self.clearBtn.clicked.connect(self.clear_logs)
+        headerLayout.addWidget(title)
+        headerLayout.addStretch()
+        headerLayout.addWidget(self.clearBtn)
+
+        self.logArea = TextEdit()
+        self.logArea.setReadOnly(True)
+        self.logArea.setMaximumHeight(200)
+        # 移除硬编码样式，使用 qfluentwidgets 默认样式以适配主题
+
+        layout.addLayout(headerLayout)
+        layout.addWidget(self.logArea)
+
+    def append_log(self, text):
+        self.logArea.append(text.strip())
+        # 自动滚动到底部
+        scrollbar = self.logArea.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def clear_logs(self):
+        self.logArea.clear()
 
 
 class SynthesisInterface(ScrollArea):
@@ -11,23 +255,378 @@ class SynthesisInterface(ScrollArea):
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self.view = QWidget(self)
-        self.vBoxLayout = QVBoxLayout(self.view)
-
-        self.label = QLabel("语音合成占位符 - 图标系统已就绪", self)
-        self.label.setAlignment(Qt.AlignCenter)
+        self.view = QWidget()
+        self.mainLayout = QHBoxLayout(self.view)
 
         self.__initWidget()
+        self.__initLayout()
 
     def __initWidget(self):
         self.view.setObjectName('view')
         self.setObjectName('synthesisInterface')
+        
+        # 强制透明背景以适配主题
+        self.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
+        self.viewport().setStyleSheet("background-color: transparent;")
+        self.view.setStyleSheet("background-color: transparent;")
+        
+        # 初始化网络管理器与服务器地址
+        self.network_manager = QNetworkAccessManager(self)
+        self.server_url = "http://127.0.0.1:8000"
+        
         StyleSheet.SYNTHESIS_INTERFACE.apply(self)
 
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setViewportMargins(0, 0, 0, 0)
         self.setWidget(self.view)
         self.setWidgetResizable(True)
 
-        self.vBoxLayout.addWidget(self.label)
-        self.view.setObjectName('view')
+    def __initLayout(self):
+        self.mainLayout.setContentsMargins(16, 16, 16, 16)
+        self.mainLayout.setSpacing(16)
+
+        # --- 左列：系统状态与参数 (50%) ---
+        leftWidget = QWidget()
+        leftLayout = QVBoxLayout(leftWidget)
+        leftLayout.setContentsMargins(0, 0, 0, 0)
+        leftLayout.setSpacing(12)
+        leftWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        
+        # 1. 服务器控制卡 (置顶)
+        self.serverCard = CardWidget()
+        serverLayout = QVBoxLayout(self.serverCard)
+        serverLayout.setContentsMargins(16, 12, 16, 12) # 减小内边距
+        serverLayout.setSpacing(8)
+
+        serverHeader = QHBoxLayout()
+        self.statusIndicator = CaptionLabel("● 离线")
+        self.statusIndicator.setStyleSheet("color: gray;")
+        self.startServerBtn = PushButton(FIF.PLAY, "启动服务")
+        self.startServerBtn.setFixedWidth(140) # 增加宽度以显示完整文本
+        self.startServerBtn.clicked.connect(self.__toggle_server)
+        serverHeader.addWidget(self.statusIndicator)
+        serverHeader.addStretch()
+        serverHeader.addWidget(self.startServerBtn)
+
+        self.serverLogCard = ServerLogCard()
+        # 优化日志卡片内部间距
+        self.serverLogCard.layout().setContentsMargins(16, 8, 16, 8)
+        self.serverLogCard.logArea.setMaximumHeight(120) # 限制高度
+
+        serverLayout.addLayout(serverHeader)
+        serverLayout.addWidget(self.serverLogCard)
+
+        # 初始化 QProcess
+        self.serverProcess = QProcess(self)
+        self.serverProcess.readyReadStandardOutput.connect(self.__on_server_output)
+        self.serverProcess.readyReadStandardError.connect(self.__on_server_output)
+        self.serverProcess.finished.connect(self.__on_server_finished)
+
+        # 2. 参考音频卡
+        refCard = CardWidget()
+        refLayout = QVBoxLayout(refCard)
+        refLayout.setContentsMargins(16, 12, 16, 12)
+        refLayout.setSpacing(8)
+        
+        refTitle = StrongBodyLabel("参考音频（可选）")
+        self.uploadBtn = PushButton(FIF.FOLDER_ADD, "上传参考音频")
+        self.uploadBtn.setToolTip("上传参考音频以实现声音克隆，支持 WAV/MP3/FLAC 格式")
+        self.uploadBtn.installEventFilter(ToolTipFilter(self.uploadBtn))
+        self.uploadBtn.clicked.connect(self.__onUploadRef)
+        
+        ultimateLayout = QHBoxLayout()
+        self.ultimateSwitch = SwitchButton()
+        self.ultimateSwitch.setOnText("开启")
+        self.ultimateSwitch.setOffText("关闭")
+        self.ultimateSwitch.setToolTip("开启后将使用参考音频的完整声学特征进行极致还原，需填写 ASR 文本")
+        self.ultimateSwitch.installEventFilter(ToolTipFilter(self.ultimateSwitch))
+        self.ultimateSwitch.checkedChanged.connect(self.__onUltimateModeChanged)
+        ultimateLabel = CaptionLabel("极致克隆模式")
+        ultimateLayout.addWidget(self.ultimateSwitch)
+        ultimateLayout.addWidget(ultimateLabel)
+        ultimateLayout.addStretch(1)
+        
+        refLayout.addWidget(refTitle)
+        refLayout.addWidget(self.uploadBtn)
+        
+        # ASR 文本输入框 (始终显示)
+        self.asrInput = TextEdit()
+        self.asrInput.setPlaceholderText("参考音频对应的文本内容（用于声音克隆）...")
+        self.asrInput.setMaximumHeight(60)
+        refLayout.addWidget(self.asrInput)
+
+        refLayout.addLayout(ultimateLayout)
+
+        # 3. 控制指令卡 (高度自适应)
+        promptCard = CardWidget()
+        promptLayout = QVBoxLayout(promptCard)
+        promptLayout.setContentsMargins(16, 12, 16, 12)
+        promptLayout.setSpacing(8)
+        
+        promptTitle = StrongBodyLabel("控制指令（可选）")
+        self.promptInput = TextEdit()
+        self.promptInput.setPlaceholderText("如：年轻女性，温柔甜美 / A warm young woman")
+        # 移除最大高度限制，让其占据左侧剩余空间
+        self.promptInput.setToolTip("通过文字描述生成目标音色，无需参考音频")
+        self.promptInput.installEventFilter(ToolTipFilter(self.promptInput))
+        
+        # 增加禁用态提示支持：通过临时替换文本实现
+        self.promptOriginalText = ""
+        
+        promptLayout.addWidget(promptTitle)
+        promptLayout.addWidget(self.promptInput, 1) # 1 表示占据剩余垂直空间
+
+        # 4. 高级设置卡
+        advCard = CardWidget()
+        advLayout = QVBoxLayout(advCard)
+        advLayout.setContentsMargins(16, 12, 16, 12)
+        advLayout.setSpacing(8)
+        
+        advTitle = StrongBodyLabel("高级设置")
+        
+        # CFG 滑块
+        self.cfgLabel = CaptionLabel("CFG（引导强度）: 2.0")
+        self.cfgSlider = Slider(Qt.Horizontal)
+        self.cfgSlider.setRange(5, 50)
+        self.cfgSlider.setValue(20)
+        self.cfgSlider.setToolTip("值越高越遵循控制指令，但可能影响自然度（推荐 1.5-3.0）")
+        self.cfgSlider.installEventFilter(ToolTipFilter(self.cfgSlider))
+        self.cfgSlider.valueChanged.connect(lambda v: self.cfgLabel.setText(f"CFG（引导强度）: {v/10:.1f}"))
+        
+        # 步数滑块
+        self.stepsLabel = CaptionLabel("推理步数: 10")
+        self.stepsSlider = Slider(Qt.Horizontal)
+        self.stepsSlider.setRange(5, 30)
+        self.stepsSlider.setValue(10)
+        self.stepsSlider.setToolTip("步数越多质量越高，但速度越慢（推荐 10-15）")
+        self.stepsSlider.installEventFilter(ToolTipFilter(self.stepsSlider))
+        self.stepsSlider.valueChanged.connect(lambda v: self.stepsLabel.setText(f"推理步数: {v}"))
+        
+        advLayout.addWidget(advTitle)
+        advLayout.addWidget(self.cfgLabel)
+        advLayout.addWidget(self.cfgSlider)
+        advLayout.addWidget(self.stepsLabel)
+        advLayout.addWidget(self.stepsSlider)
+
+        leftLayout.addWidget(self.serverCard)
+        leftLayout.addWidget(refCard)
+        leftLayout.addWidget(promptCard)
+        leftLayout.addStretch(1) # 仅保留底部弹性空间
+
+        # --- 右列：目标文本 + 结果展示区 (50%) ---
+        rightWidget = QWidget()
+        rightLayout = QVBoxLayout(rightWidget)
+        rightLayout.setContentsMargins(0, 0, 0, 0)
+        rightLayout.setSpacing(12)
+        rightWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        # 1. 目标文本卡
+        textCard = CardWidget()
+        textLayout = QVBoxLayout(textCard)
+        textLayout.setContentsMargins(16, 12, 16, 12)
+        textLayout.setSpacing(8)
+        
+        textTitle = StrongBodyLabel("目标文本")
+        self.textInput = TextEdit()
+        self.textInput.setPlaceholderText("请输入要合成的内容...")
+        
+        textLayout.addWidget(textTitle)
+        textLayout.addWidget(self.textInput)
+
+        # 2. 高级设置卡 (移至生成按钮上方)
+        advCard = CardWidget()
+        advLayout = QVBoxLayout(advCard)
+        advLayout.setContentsMargins(16, 12, 16, 12)
+        advLayout.setSpacing(8)
+        
+        advTitle = StrongBodyLabel("高级设置")
+        
+        # CFG 滑块
+        self.cfgLabel = CaptionLabel("CFG（引导强度）: 2.0")
+        self.cfgSlider = Slider(Qt.Horizontal)
+        self.cfgSlider.setRange(5, 50)
+        self.cfgSlider.setValue(20)
+        self.cfgSlider.setToolTip("值越高越遵循控制指令，但可能影响自然度（推荐 1.5-3.0）")
+        self.cfgSlider.installEventFilter(ToolTipFilter(self.cfgSlider))
+        self.cfgSlider.valueChanged.connect(lambda v: self.cfgLabel.setText(f"CFG（引导强度）: {v/10:.1f}"))
+        
+        # 步数滑块
+        self.stepsLabel = CaptionLabel("推理步数: 10")
+        self.stepsSlider = Slider(Qt.Horizontal)
+        self.stepsSlider.setRange(5, 30)
+        self.stepsSlider.setValue(10)
+        self.stepsSlider.setToolTip("步数越多质量越高，但速度越慢（推荐 10-15）")
+        self.stepsSlider.installEventFilter(ToolTipFilter(self.stepsSlider))
+        self.stepsSlider.valueChanged.connect(lambda v: self.stepsLabel.setText(f"推理步数: {v}"))
+        
+        advLayout.addWidget(advTitle)
+        advLayout.addWidget(self.cfgLabel)
+        advLayout.addWidget(self.cfgSlider)
+        advLayout.addWidget(self.stepsLabel)
+        advLayout.addWidget(self.stepsSlider)
+
+        # 3. 生成按钮
+        self.generateBtn = PrimaryPushButton(FIF.PLAY, "开始生成")
+        self.generateBtn.setMinimumHeight(40) # 减小按钮高度
+        self.generateBtn.setToolTip("开始语音合成，请确保已填写目标文本")
+        self.generateBtn.installEventFilter(ToolTipFilter(self.generateBtn))
+        self.generateBtn.clicked.connect(self.__onGenerateClicked)
+
+        # 3. 音频播放器（默认可见）
+        self.playerCard = AudioPlayerCard()
+
+        # 4. 性能监视器
+        self.perfCard = PerformanceMonitorCard()
+
+        rightLayout.addWidget(textCard)
+        rightLayout.addWidget(advCard)
+        rightLayout.addWidget(self.generateBtn)
+        rightLayout.addWidget(self.playerCard)
+        rightLayout.addWidget(self.perfCard)
+        rightLayout.addStretch(1)
+
+        self.mainLayout.addWidget(leftWidget, 1)
+        self.mainLayout.addWidget(rightWidget, 1)
+
+    def __onUploadRef(self):
+        path, _ = QFileDialog.getOpenFileName(self, "选择参考音频", "", "Audio Files (*.wav *.mp3 *.flac)")
+        if path:
+            self.ref_audio_path = path  # 保存参考音频路径
+            self.uploadBtn.setText(f"已选择: {os.path.basename(path)}")
+            self.uploadBtn.setIcon(FIF.ACCEPT)
+
+        # 初始化网络管理器用于 HTTP 通信
+        self.network_manager = QNetworkAccessManager(self)
+        self.server_url = "http://127.0.0.1:8000"
+
+    def __onGenerateClicked(self):
+        text = self.textInput.toPlainText().strip()
+        if not text:
+            InfoBar.warning(title='提示', content="请先输入目标文本", parent=self)
+            return
+        
+        self.generateBtn.setEnabled(False)
+        self.generateBtn.setText("推理中...")
+        self.generateBtn.setToolTip("推理任务正在进行，请耐心等待完成")
+        
+        # 构造请求数据
+        payload = {
+            "text": text,
+            "reference_wav_path": getattr(self, 'ref_audio_path', None),  # 修正字段名以匹配服务器
+            "prompt_wav_path": getattr(self, 'ref_audio_path', None) if self.ultimateSwitch.isChecked() else None,  # 极致克隆模式
+            "prompt_text": self.asrInput.toPlainText().strip() if self.ultimateSwitch.isChecked() else None,  # ASR文本作为prompt_text
+            "cfg_value": self.cfgSlider.value() / 10.0,  # 修正字段名
+            "inference_timesteps": self.stepsSlider.value(),  # 修正字段名
+            "output_dir": str(Path(__file__).parent.parent.parent / "outputs")  # 指定输出目录
+        }
+
+        request = QNetworkRequest(QUrl(f"{self.server_url}/generate"))
+        request.setHeader(QNetworkRequest.ContentTypeHeader, "application/json")
+        reply = self.network_manager.post(request, json.dumps(payload).encode())
+        reply.finished.connect(lambda: self.__on_inference_finished(reply))
+
+    def __on_inference_finished(self, reply):
+        self.generateBtn.setEnabled(True)
+        self.generateBtn.setText("开始生成")
+        self.generateBtn.setToolTip("开始语音合成，请确保已填写目标文本")
+        
+        if reply.error() == QNetworkReply.NoError:
+            data = json.loads(reply.readAll().data())
+            # 兼容两种响应格式
+            if data.get("success") or data.get("status") == "success":
+                audio_path = data.get('audio_path')
+                if audio_path and os.path.exists(audio_path):
+                    # 播放生成的音频
+                    self.playerCard.play_audio(audio_path)
+                    InfoBar.success(title='成功', content=f"音频已生成并开始播放: {os.path.basename(audio_path)}", parent=self)
+                else:
+                    InfoBar.warning(title='警告', content="音频文件未找到或路径无效", parent=self)
+            else:
+                error_msg = data.get('error') or data.get('detail', '未知错误')
+                InfoBar.error(title='错误', content=error_msg, parent=self)
+        else:
+            InfoBar.error(title='网络错误', content="无法连接到推理服务器，请检查服务是否启动。", parent=self)
+        
+        reply.deleteLater()
+
+    def __onUltimateModeChanged(self, checked):
+        if checked:
+            # 保存原文本并替换为提示
+            self.promptOriginalText = self.promptInput.toPlainText()
+            self.promptInput.setPlainText("极致克隆模式下不可使用控制指令")
+            self.promptInput.setEnabled(False)
+            
+            # 极致模式下，ASR 文本框变为必填项视觉提示（可选）
+            self.asrInput.setPlaceholderText("参考音频对应的文本内容（极致克隆必填）...")
+        else:
+            # 恢复原文本
+            self.promptInput.setPlainText(self.promptOriginalText)
+            self.promptInput.setEnabled(True)
+            
+            # 恢复普通模式提示
+            self.asrInput.setPlaceholderText("参考音频对应的文本内容（用于声音克隆）...")
+
+    def __toggle_server(self):
+        if self.serverProcess.state() == QProcess.NotRunning:
+            self.startServerBtn.setEnabled(False)
+            self.startServerBtn.setText("启动中...")
+            self.serverLogCard.append_log("[系统] 正在初始化推理服务器...")
+            
+            # 定位 voxcpm2_env 环境下的 Python 解释器和 inference_server.py
+            import os, sys
+            
+            # 1. 确定 Python 解释器路径 (优先使用 voxcpm2_env)
+            env_python = os.path.join(os.path.dirname(__file__), "..", "..", "..", "voxcpm2_env", "python.exe")
+            if not os.path.exists(env_python):
+                env_python = "h:/VoxCPM2/voxcpm2_env/python.exe"
+            
+            # 2. 确定脚本路径
+            script_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "voxcpm-gui", "inference_server.py")
+            if not os.path.exists(script_path):
+                script_path = "h:/VoxCPM2/voxcpm-gui/inference_server.py"
+
+            if not os.path.exists(env_python) or not os.path.exists(script_path):
+                self.serverLogCard.append_log("[错误] 找不到 voxcpm2_env 或 inference_server.py，请检查路径。")
+                self.startServerBtn.setEnabled(True)
+                self.startServerBtn.setText("启动服务")
+                return
+
+            self.serverLogCard.append_log(f"[系统] 使用环境: {env_python}")
+            # 启动进程
+            self.serverProcess.start(env_python, [script_path])
+        else:
+            self.serverProcess.terminate()
+            self.serverLogCard.append_log("[系统] 正在请求停止服务器...")
+            self.startServerBtn.setEnabled(False)
+            self.startServerBtn.setText("停止中...")
+
+    def __on_server_output(self):
+        try:
+            # 读取所有可用输出
+            text = self.serverProcess.readAllStandardOutput().data().decode('utf-8', errors='ignore')
+            error_text = self.serverProcess.readAllStandardError().data().decode('utf-8', errors='ignore')
+            
+            full_log = text + error_text
+            if full_log:
+                # 逐行处理日志
+                for line in full_log.splitlines():
+                    if line.strip():
+                        self.serverLogCard.append_log(line)
+                        
+                        # 状态识别逻辑 (对齐原始 GUI 的启动成功标志)
+                        if "Uvicorn running on" in line or "Application startup complete" in line:
+                            self.statusIndicator.setText("● 在线")
+                            self.statusIndicator.setStyleSheet("color: #107C10;") # Fluent Green
+                            self.startServerBtn.setText("停止服务")
+                            self.startServerBtn.setIcon(FIF.CANCEL)
+                            self.startServerBtn.setEnabled(True)
+                            self.serverLogCard.append_log("[系统] 服务器已就绪，可以开始合成。")
+        except Exception as e:
+            self.serverLogCard.append_log(f"[错误] 日志读取异常: {str(e)}")
+
+    def __on_server_finished(self, code):
+        self.statusIndicator.setText("● 离线")
+        self.statusIndicator.setStyleSheet("color: gray;")
+        self.startServerBtn.setText("启动服务")
+        self.startServerBtn.setIcon(FIF.PLAY)
+        self.startServerBtn.setEnabled(True)
+        self.serverLogCard.append_log(f"[系统] 服务器进程已退出 (Code: {code})")
