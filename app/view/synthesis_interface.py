@@ -777,6 +777,19 @@ class SynthesisInterface(ScrollArea):
                             self.startServerBtn.setIcon(FIF.CANCEL)
                             self.startServerBtn.setEnabled(True)
                             self.serverLogCard.append_log("[系统] 服务器已就绪，可以开始合成。")
+                            
+                            # 弹出主题色成功提醒（顶部，自动消失）
+                            InfoBar.success(
+                                title='服务器启动成功',
+                                content="推理服务器已就绪，可以开始语音合成",
+                                parent=self,
+                                position=InfoBarPosition.TOP,
+                                duration=3000
+                            )
+                            
+                            # 启用生成按钮
+                            self.generateBtn.setEnabled(True)
+                            self.generateBtn.setToolTip("开始语音合成，请确保已填写目标文本")
         except Exception as e:
             self.serverLogCard.append_log(f"[错误] 日志读取异常: {str(e)}")
 
@@ -791,3 +804,55 @@ class SynthesisInterface(ScrollArea):
         self.startServerBtn.setIcon(FIF.PLAY)
         self.startServerBtn.setEnabled(True)
         self.serverLogCard.append_log(f"[系统] 服务器进程已退出 (Code: {code})")
+        
+        # 禁用生成按钮
+        self.generateBtn.setEnabled(False)
+        self.generateBtn.setToolTip("请先启动推理服务器")
+
+    def __toggle_server(self):
+        if self.serverProcess.state() == QProcess.NotRunning:
+            # 显示进度条
+            self.serverProgressBar.setVisible(True)
+            self.serverProgressBar.start()
+            
+            # 禁用生成按钮（防止在服务器启动过程中发送请求）
+            self.generateBtn.setEnabled(False)
+            self.generateBtn.setToolTip("服务器启动中，请等待...")
+            
+            self.startServerBtn.setEnabled(False)
+            self.startServerBtn.setText("启动中...")
+            self.serverLogCard.append_log("[系统] 正在初始化推理服务器...")
+            
+            # 定位 voxcpm2_env 环境下的 Python 解释器和 inference_server.py
+            import os, sys
+            
+            # 1. 确定 Python 解释器路径 (优先使用 voxcpm2_env)
+            env_python = os.path.join(os.path.dirname(__file__), "..", "..", "..", "voxcpm2_env", "python.exe")
+            if not os.path.exists(env_python):
+                env_python = "h:/VoxCPM2/voxcpm2_env/python.exe"
+            
+            # 2. 确定脚本路径
+            script_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "voxcpm-gui", "inference_server.py")
+            if not os.path.exists(script_path):
+                script_path = "h:/VoxCPM2/voxcpm-gui/inference_server.py"
+
+            if not os.path.exists(env_python) or not os.path.exists(script_path):
+                self.serverLogCard.append_log("[错误] 找不到 voxcpm2_env 或 inference_server.py，请检查路径。")
+                self.serverProgressBar.stop()
+                self.serverProgressBar.setVisible(False)
+                self.startServerBtn.setEnabled(True)
+                self.startServerBtn.setText("启动服务")
+                return
+
+            self.serverLogCard.append_log(f"[系统] 使用环境: {env_python}")
+            # 启动进程
+            self.serverProcess.start(env_python, [script_path])
+        else:
+            # 隐藏进度条
+            self.serverProgressBar.stop()
+            self.serverProgressBar.setVisible(False)
+            
+            self.serverProcess.terminate()
+            self.serverLogCard.append_log("[系统] 正在请求停止服务器...")
+            self.startServerBtn.setEnabled(False)
+            self.startServerBtn.setText("停止中...")
