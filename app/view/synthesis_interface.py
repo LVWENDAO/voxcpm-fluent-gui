@@ -606,7 +606,7 @@ class SynthesisInterface(ScrollArea):
         
         if getattr(sys, 'frozen', False):
             # 如果是打包的exe文件，使用exe所在目录
-            voxcpm2_root = os.path.dirname(sys.executable)
+            voxcpm2_root = Path(sys.executable).parent
         else:
             # 如果是源代码运行，向上查找直到找到 VoxCPM2 根目录
             current_dir = Path(__file__).resolve()
