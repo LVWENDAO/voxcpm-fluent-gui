@@ -1,6 +1,6 @@
 # coding:utf-8
-from PyQt5.QtCore import Qt, QUrl
-from PyQt5.QtGui import QIcon, QDesktopServices
+from PyQt5.QtCore import QUrl, Qt, QTimer, QPoint, QPropertyAnimation, QEasingCurve, QSize
+from PyQt5.QtGui import QIcon, QDesktopServices, QColor, QPainter, QImage, QPixmap
 from PyQt5.QtWidgets import QApplication
 
 from qfluentwidgets import (NavigationAvatarWidget, NavigationItemPosition, MessageBox, FluentWindow,
@@ -8,9 +8,14 @@ from qfluentwidgets import (NavigationAvatarWidget, NavigationItemPosition, Mess
 from qfluentwidgets import FluentIcon as FIF
 
 from app.common.config import cfg
+from app.common.icon import Icon
 from app.common.signal_bus import signalBus
-from app.view.synthesis_interface import SynthesisInterface
+from app.common.style_sheet import StyleSheet
+from app.view.synthesis_interface import SynthesisInterface  
 from app.view.setting_interface import SettingInterface
+
+# 导入资源文件（确保资源被加载）
+import app.resource_rc
 
 
 class MainWindow(FluentWindow):
@@ -51,18 +56,20 @@ class MainWindow(FluentWindow):
     def initWindow(self):
         self.resize(960, 780)
         self.setMinimumWidth(760)
+        self.setWindowIcon(QIcon(':/images/logo.png'))
         self.setWindowTitle('VoxCPM2 GUI')
 
         self.setMicaEffectEnabled(True)
 
-        # create splash screen
-        self.splashScreen = SplashScreen(QIcon(":/icons/images/logo.png"), self)
-        self.splashScreen.setIconSize(self.splashScreen.iconSize())
+        # create splash screen using window icon
+        self.splashScreen = SplashScreen(self.windowIcon(), self)
+        self.splashScreen.setIconSize(QSize(256, 256))
         self.splashScreen.raise_()
 
         desktop = QApplication.desktop().availableGeometry()
         w, h = desktop.width(), desktop.height()
         self.move(w//2 - self.width()//2, h//2 - self.height()//2)
+        
         self.show()
         QApplication.processEvents()
 

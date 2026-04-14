@@ -29,6 +29,15 @@ QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
 app = QApplication(sys.argv)
 app.setAttribute(Qt.AA_DontCreateNativeWidgetSiblings)
 
+# Windows-specific: Set AppUserModelID to ensure taskbar icon displays correctly
+if sys.platform == "win32":
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("com.voxcpm2.gui")
+
+# 设置应用程序图标（使用 Qt 资源系统）
+from PyQt5.QtGui import QIcon
+app.setWindowIcon(QIcon(':/images/logo.png'))
+
 # internationalization (optional for now)
 locale = cfg.get(cfg.language).value if hasattr(cfg, 'language') else None
 if locale:
