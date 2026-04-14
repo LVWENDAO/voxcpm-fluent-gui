@@ -56,7 +56,15 @@ class MainWindow(FluentWindow):
     def initWindow(self):
         self.resize(960, 780)
         self.setMinimumWidth(760)
-        self.setWindowIcon(QIcon(':/images/logo.png'))
+        
+        # 设置窗口图标（支持多分辨率以优化任务栏显示）
+        icon = QIcon()
+        icon.addFile(':/images/logo_16.png', QSize(16, 16))
+        icon.addFile(':/images/logo_32.png', QSize(32, 32))
+        icon.addFile(':/images/logo_48.png', QSize(48, 48))
+        icon.addFile(':/images/logo_256.png', QSize(256, 256))
+        self.setWindowIcon(icon)
+        
         self.setWindowTitle('VoxCPM2 GUI')
 
         self.setMicaEffectEnabled(True)

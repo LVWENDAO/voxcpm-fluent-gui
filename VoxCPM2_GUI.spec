@@ -46,5 +46,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='assets/images/voxcpm_logo.png',  # exe 文件图标
+    icon='assets/images/icon.ico',  # 多分辨率 ICO 文件
 )
