@@ -193,32 +193,40 @@ def generate_speech(request: SynthesisRequest):
         # 1. 检查是否使用已注册的音色缓存
         if request.voice_id:
             logger.info(f"[Inference] Using registered voice_id: {request.voice_id}")
-            cache_path = VOICE_CACHE_DIR / f"{request.voice_id}.pt"
-            if cache_path.exists():
-                logger.info(f"[Inference] Loading voice cache from: {cache_path}")
-                prompt_cache = torch.load(str(cache_path), map_location="cpu")
-                
-                # 验证缓存内容
-                cache_mode = prompt_cache.get('mode', 'unknown')
-                has_audio_feat = 'audio_feat' in prompt_cache
-                audio_shape = prompt_cache.get('audio_feat', torch.tensor([])).shape if has_audio_feat else 'N/A'
-                
-                logger.info(f"[Cache Loaded] Mode: {cache_mode}")
-                logger.info(f"[Cache Loaded] Has audio_feat: {has_audio_feat}, Shape: {audio_shape}")
-                
-                # 如果音色记录里有 seed 且前端没传，则使用音色自带的 seed
-                db = {}
-                if VOICE_DB_PATH.exists():
-                    with open(VOICE_DB_PATH, 'r', encoding='utf-8') as f:
-                        db = json.load(f)
-                if request.seed is None and request.voice_id in db:
-                    current_seed = db[request.voice_id].get('config', {}).get('seed', 0)
+            
+            # 新结构：{voice_id}/cache.pt
+            cache_path = VOICE_CACHE_DIR / request.voice_id / "cache.pt"
+            
+            if not cache_path.exists():
+                logger.error(f"[Inference] Voice cache file not found for: {request.voice_id}")
+                raise HTTPException(status_code=404, detail=f"Voice ID not found: {request.voice_id}")
+            
+            logger.info(f"[Inference] Loading voice cache from: {cache_path}")
+            prompt_cache = torch.load(str(cache_path), map_location="cpu")
+            
+            # 验证缓存内容
+            cache_mode = prompt_cache.get('mode', 'unknown')
+            has_audio_feat = 'audio_feat' in prompt_cache
+            audio_shape = prompt_cache.get('audio_feat', torch.tensor([])).shape if has_audio_feat else 'N/A'
+            
+            logger.info(f"[Cache Loaded] Mode: {cache_mode}")
+            logger.info(f"[Cache Loaded] Has audio_feat: {has_audio_feat}, Shape: {audio_shape}")
+            
+            # 如果音色记录里有 seed 且前端没传，则使用音色自带的 seed
+            db = {}
+            if VOICE_DB_PATH.exists():
+                with open(VOICE_DB_PATH, 'r', encoding='utf-8') as f:
+                    db = json.load(f)
+            
+            voice_seed = db.get(request.voice_id, {}).get('config', {}).get('seed', None)
+            if voice_seed is not None:
+                if request.seed is None:
+                    current_seed = voice_seed
                     logger.info(f"[Seed] Using voice-specific seed: {current_seed}")
                 else:
-                    logger.info(f"[Seed] Using request seed: {request.seed}")
+                    logger.info(f"[Seed] Using request seed: {request.seed} (overriding voice seed: {voice_seed})")
             else:
-                logger.error(f"[Inference] Voice cache file not found: {cache_path}")
-                raise HTTPException(status_code=404, detail=f"Voice ID not found: {request.voice_id}")
+                logger.info(f"[Seed] No voice seed configured, using request seed: {request.seed}")
         elif request.reference_wav_path:
             # 如果没有 voice_id 但有参考音频，则实时提取缓存
             logger.info("[Inference] Extracting prompt cache from reference audio...")

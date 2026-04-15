@@ -1,5 +1,5 @@
 # coding:utf-8
-from PyQt5.QtCore import Qt, QTimer, QUrl
+from PyQt5.QtCore import Qt, QTimer, QUrl, QFileSystemWatcher
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QInputDialog
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from pathlib import Path
@@ -79,6 +79,10 @@ class HistoryInterface(ScrollArea):
         # 初始化播放器 (PyQt5 风格)
         self.player = QMediaPlayer()
         
+        # 初始化文件系统监听器
+        self.watcher = QFileSystemWatcher()
+        self.watcher.directoryChanged.connect(self.__onDirectoryChanged)
+        
         self.view = QWidget()
         self.mainLayout = QVBoxLayout(self.view)
         self.cardsLayout = QVBoxLayout()
@@ -88,13 +92,13 @@ class HistoryInterface(ScrollArea):
         self.history_dir = base_dir / "outputs" / "generation_history"
         self.history_dir.mkdir(parents=True, exist_ok=True)
         
+        # 开始监听历史文件夹
+        self.watcher.addPath(str(self.history_dir))
+        
         # 标题栏
         titleRow = QHBoxLayout()
         titleRow.addWidget(StrongBodyLabel("生成历史"))
         titleRow.addStretch()
-        refreshBtn = TransparentToolButton(FIF.SYNC)
-        refreshBtn.clicked.connect(self.loadHistory)
-        titleRow.addWidget(refreshBtn)
         
         self.mainLayout.addLayout(titleRow)
         self.mainLayout.addLayout(self.cardsLayout)
@@ -107,39 +111,36 @@ class HistoryInterface(ScrollArea):
         
         QTimer.singleShot(500, self.loadHistory)
 
+    def __onDirectoryChanged(self, path):
+        """当文件夹内容变化时自动刷新"""
+        # 增加一点延迟，确保文件写入完成
+        QTimer.singleShot(200, self.loadHistory)
+
     def loadHistory(self):
-        print(f"[History Debug] Starting to load history from: {self.history_dir}")
-        
         # 清空旧卡片
         while self.cardsLayout.count():
             item = self.cardsLayout.takeAt(0)
             if item.widget(): 
-                print(f"[History Debug] Deleting widget: {item.widget()}")
                 item.widget().deleteLater()
             
         if not self.history_dir.exists():
-            print(f"[History Debug] Directory does not exist: {self.history_dir}")
             self.history_dir.mkdir(parents=True, exist_ok=True)
             
         folders = sorted([f for f in self.history_dir.iterdir() if f.is_dir()], reverse=True)
-        print(f"[History Debug] Found {len(folders)} history folders")
         
         if not folders:
-            print("[History Debug] No history records found, showing empty label")
             self.cardsLayout.addWidget(BodyLabel("暂无历史记录"))
             return
             
         for folder in folders:
             meta_file = folder / "meta.json"
-            print(f"[History Debug] Checking folder: {folder.name}, meta exists: {meta_file.exists()}")
             if meta_file.exists():
                 try:
                     with open(meta_file, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                    print(f"[History Debug] Loaded meta for: {data.get('id')}")
                     self.cardsLayout.addWidget(HistoryCard(data, self))
-                except Exception as e:
-                    print(f"[History Debug] Error loading meta for {folder.name}: {e}")
+                except Exception:
+                    pass
 
     def onPlay(self, history_id):
         audio_path = self.history_dir / history_id / "audio.wav"
@@ -161,41 +162,71 @@ class HistoryInterface(ScrollArea):
             InfoBar.warning(title='提示', content="名称不能为空", parent=self)
             return
         
-        base_dir = Path(__file__).resolve().parent.parent.parent
+        base_dir = Path(__file__).resolve().parent.parent.parent.parent
         history_folder = base_dir / "outputs" / "generation_history" / history_id
-        cache_src = history_folder / "cache.pt"
         
-        if not cache_src.exists():
-            InfoBar.error(title='错误', content="缓存文件缺失", parent=self)
+        # 1. 读取历史元数据
+        meta_file = history_folder / "meta.json"
+        if not meta_file.exists():
+            InfoBar.error(title='错误', content="元数据文件缺失", parent=self)
             return
             
+        with open(meta_file, 'r', encoding='utf-8') as f:
+            history_meta = json.load(f)
+            
         try:
-            # 1. 生成 ID 并复制文件
+            # 2. 生成 ID 并复制完整文件
             voice_id = hashlib.md5(f"{name}{time.time()}".encode()).hexdigest()[:8]
             voice_cache_dir = base_dir / "outputs" / "voice_cache"
-            cache_dst = voice_cache_dir / f"{voice_id}.pt"
-            shutil.copy2(str(cache_src), str(cache_dst))
+            voice_folder = voice_cache_dir / voice_id
+            voice_folder.mkdir(parents=True, exist_ok=True)
             
-            # 2. 更新 voices_db.json
+            # 复制缓存文件
+            cache_src = history_folder / "cache.pt"
+            if cache_src.exists():
+                shutil.copy2(str(cache_src), str(voice_folder / "cache.pt"))
+            
+            # 复制音频文件（用于预览）
+            audio_src = history_folder / "audio.wav"
+            if audio_src.exists():
+                shutil.copy2(str(audio_src), str(voice_folder / "preview.wav"))
+            
+            # 3. 构建并保存音色元数据
+            voice_meta = {
+                "name": name,
+                "id": voice_id,
+                "created_at": history_meta.get('timestamp', ''),
+                "prompt_text": history_meta.get('text', ''),
+                "config": {
+                    "seed": history_meta.get('seed', ''),
+                    "inference_timesteps": history_meta.get('inference_timesteps', 32),
+                    "cfg_value": history_meta.get('cfg_value', 4.0)
+                },
+                "files": {
+                    "cache": str(voice_folder / "cache.pt"),
+                    "preview": str(voice_folder / "preview.wav") if audio_src.exists() else None
+                }
+            }
+            
             db_path = voice_cache_dir / "voices_db.json"
             db = {}
             if db_path.exists():
-                with open(db_path, 'r', encoding='utf-8') as f: db = json.load(f)
+                with open(db_path, 'r', encoding='utf-8') as f: 
+                    db = json.load(f)
             
-            db[voice_id] = {"name": name, "path": str(cache_dst)}
+            db[voice_id] = voice_meta
             with open(db_path, 'w', encoding='utf-8') as f:
                 json.dump(db, f, ensure_ascii=False, indent=4)
             
-            # 3. 标记历史为已注册
-            meta_file = history_folder / "meta.json"
-            with open(meta_file, 'r', encoding='utf-8') as f: data = json.load(f)
-            data['registered'] = True
-            with open(meta_file, 'w', encoding='utf-8') as f: json.dump(data, f)
+            # 4. 标记历史为已注册
+            history_meta['registered'] = True
+            with open(meta_file, 'w', encoding='utf-8') as f: 
+                json.dump(history_meta, f)
             
-            InfoBar.success(title='成功', content="已注册至音色库", parent=self)
+            InfoBar.success(title='成功', content=f"已注册至音色库: {name}", parent=self)
             self.loadHistory()
             
-            # 4. 触发信号通知合成界面刷新
+            # 5. 触发信号通知合成界面刷新
             from app.common.signal_bus import signalBus
             signalBus.voiceRegistered.emit()
         except Exception as e:

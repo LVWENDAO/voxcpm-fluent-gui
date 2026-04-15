@@ -1,5 +1,5 @@
 # coding:utf-8
-from PyQt5.QtCore import Qt, QUrl, QObject, QEvent, QProcess, QTimer
+from PyQt5.QtCore import Qt, QUrl, QObject, QEvent, QProcess, QTimer, QFileSystemWatcher
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 import json
 import os
@@ -290,12 +290,23 @@ class SynthesisInterface(ScrollArea):
         self.view = QWidget()
         self.mainLayout = QHBoxLayout(self.view)
 
+        # 初始化文件系统监听器（监听音色库变化）
+        self.watcher = QFileSystemWatcher()
+        self.watcher.directoryChanged.connect(self.__onVoiceDirectoryChanged)
+        
         self.__initWidget()
         self.__initLayout()
         
         # 监听音色注册信号，实现跨页面同步
         from app.common.signal_bus import signalBus
         signalBus.voiceRegistered.connect(self.__onLoadVoices)
+        
+        # 启动时加载音色并开始监听
+        base_dir = Path(__file__).resolve().parent.parent.parent.parent
+        voice_cache_dir = base_dir / "outputs" / "voice_cache"
+        voice_cache_dir.mkdir(parents=True, exist_ok=True)
+        self.watcher.addPath(str(voice_cache_dir))
+        QTimer.singleShot(500, self.__onLoadVoices)
 
     def __initWidget(self):
         self.view.setObjectName('view')
@@ -498,13 +509,10 @@ class SynthesisInterface(ScrollArea):
         self.voiceComboBox = ComboBox()
         self.voiceComboBox.setPlaceholderText("不使用音色缓存（传统推理）")
         self.voiceComboBox.currentIndexChanged.connect(self.__onVoiceChanged)
-        self.loadVoicesBtn = PushButton(FIF.SYNC, "刷新列表")
-        self.loadVoicesBtn.clicked.connect(self.__onLoadVoices)
         
         voiceLayout.addWidget(voiceTitle)
         voiceLayout.addLayout(regLayout)
         voiceLayout.addWidget(self.voiceComboBox)
-        voiceLayout.addWidget(self.loadVoicesBtn)
 
         leftLayout.addWidget(self.serverCard)
         leftLayout.addWidget(refCard)
@@ -848,42 +856,124 @@ class SynthesisInterface(ScrollArea):
 
         try:
             import shutil, hashlib, time
-            base_dir = Path(__file__).resolve().parent.parent.parent.parent  # 修正：多跳一层到根目录
+            base_dir = Path(__file__).resolve().parent.parent.parent.parent
             history_folder = base_dir / "outputs" / "generation_history" / self.last_history_id
-            cache_src = history_folder / "cache.pt"
             
-            if not cache_src.exists():
-                InfoBar.error(title='错误', content="缓存文件已丢失，请尝试在历史界面注册", parent=self)
+            # 读取历史元数据
+            meta_file = history_folder / "meta.json"
+            if not meta_file.exists():
+                InfoBar.error(title='错误', content="元数据文件缺失", parent=self)
                 return
+                
+            with open(meta_file, 'r', encoding='utf-8') as f:
+                history_meta = json.load(f)
             
-            # 1. 生成 ID 并复制文件
+            # 生成 ID 并复制完整文件
             voice_id = hashlib.md5(f"{name}{time.time()}".encode()).hexdigest()[:8]
             voice_cache_dir = base_dir / "outputs" / "voice_cache"
-            cache_dst = voice_cache_dir / f"{voice_id}.pt"
-            shutil.copy2(str(cache_src), str(cache_dst))
+            voice_folder = voice_cache_dir / voice_id
+            voice_folder.mkdir(parents=True, exist_ok=True)
             
-            # 2. 更新 voices_db.json
+            # 复制缓存文件
+            cache_src = history_folder / "cache.pt"
+            if cache_src.exists():
+                shutil.copy2(str(cache_src), str(voice_folder / "cache.pt"))
+            
+            # 复制音频文件（用于预览）
+            audio_src = history_folder / "audio.wav"
+            if audio_src.exists():
+                shutil.copy2(str(audio_src), str(voice_folder / "preview.wav"))
+            
+            # 构建并保存音色元数据
+            voice_meta = {
+                "name": name,
+                "id": voice_id,
+                "created_at": history_meta.get('timestamp', ''),
+                "prompt_text": history_meta.get('text', ''),
+                "config": {
+                    "seed": history_meta.get('seed', ''),
+                    "inference_timesteps": history_meta.get('inference_timesteps', 32),
+                    "cfg_value": history_meta.get('cfg_value', 4.0)
+                },
+                "files": {
+                    "cache": str(voice_folder / "cache.pt"),
+                    "preview": str(voice_folder / "preview.wav") if audio_src.exists() else None
+                }
+            }
+            
             db_path = voice_cache_dir / "voices_db.json"
             db = {}
             if db_path.exists():
-                with open(db_path, 'r', encoding='utf-8') as f: db = json.load(f)
+                with open(db_path, 'r', encoding='utf-8') as f:
+                    db = json.load(f)
             
-            db[voice_id] = {"name": name, "path": str(cache_dst)}
+            db[voice_id] = voice_meta
             with open(db_path, 'w', encoding='utf-8') as f:
                 json.dump(db, f, ensure_ascii=False, indent=4)
             
-            InfoBar.success(title='成功', content=f"音色 '{name}' 已注册", parent=self)
+            # 标记历史为已注册
+            history_meta['registered'] = True
+            with open(meta_file, 'w', encoding='utf-8') as f:
+                json.dump(history_meta, f)
+            
+            InfoBar.success(title='成功', content=f"已注册至音色库: {name}", parent=self)
+            self.voiceNameInput.clear()
             self.__onLoadVoices()
+            
+            # 触发信号通知合成界面刷新
+            from app.common.signal_bus import signalBus
+            signalBus.voiceRegistered.emit()
         except Exception as e:
             InfoBar.error(title='错误', content=str(e), parent=self)
 
     def __onVoiceChanged(self, index):
-        """切换音色时自动提示"""
-        if index == 0:
-            InfoBar.info(title='提示', content="已切换至传统推理模式（不使用音色缓存）", parent=self)
-        else:
+        """切换音色时自动加载参数并回填"""
+        try:
+            if index == 0:
+                # 切换到无缓存模式：清空种子
+                self.seedInput.clear()
+                InfoBar.info(title='提示', content="已切换至传统推理模式（不使用音色缓存）", parent=self)
+                return
+            
             voice_id = self.voiceComboBox.itemData(index)
-            InfoBar.info(title='提示', content=f"已切换音色: {self.voiceComboBox.itemText(index)}", parent=self)
+            if not voice_id:
+                return
+            
+            # 读取音色完整元数据
+            base_dir = Path(__file__).resolve().parent.parent.parent.parent
+            db_path = base_dir / "outputs" / "voice_cache" / "voices_db.json"
+            
+            if db_path.exists():
+                with open(db_path, 'r', encoding='utf-8') as f:
+                    db = json.load(f)
+                
+                if voice_id in db:
+                    voice_data = db[voice_id]
+                    
+                    # 回填 seed
+                    seed = voice_data.get('config', {}).get('seed', '')
+                    self.seedInput.setText(str(seed) if seed else '')
+                    
+                    # 回填 inference_timesteps 和 cfg_value
+                    inference_timesteps = voice_data.get('config', {}).get('inference_timesteps', 32)
+                    cfg_value = voice_data.get('config', {}).get('cfg_value', 4.0)
+                    
+                    if hasattr(self, 'inferenceTimestepsSpin'):
+                        self.inferenceTimestepsSpin.setValue(inference_timesteps)
+                    if hasattr(self, 'cfgValueSpin'):
+                        self.cfgValueSpin.setValue(cfg_value)
+                    
+                    InfoBar.success(
+                        title='已加载音色参数',
+                        content=f"Seed: {seed} | Steps: {inference_timesteps} | CFG: {cfg_value}",
+                        parent=self
+                    )
+        except Exception as e:
+            print(f"[Voice Changed] Error: {e}")
+
+    def __onVoiceDirectoryChanged(self, path):
+        """当音色库文件夹变化时自动刷新下拉列表"""
+        QTimer.singleShot(200, self.__onLoadVoices)
 
     def __onLoadVoices(self):
         """从本地文件系统加载音色列表（前端直读）"""
