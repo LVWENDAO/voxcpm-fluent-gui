@@ -1,15 +1,16 @@
 # coding:utf-8
-from PyQt5.QtCore import Qt, QTimer, QUrl, QFileSystemWatcher
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QInputDialog
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+from PyQt5.QtCore import Qt, QTimer, QUrl, QFileSystemWatcher, QSize, QPoint
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem, QHeaderView
+from PyQt5.QtGui import QIcon
 from pathlib import Path
 import json, shutil, hashlib, time
 
 from qfluentwidgets import (
-    ScrollArea, CardWidget, StrongBodyLabel, BodyLabel, CaptionLabel, 
-    PushButton, PrimaryPushButton, FluentIcon as FIF, InfoBar, TransparentToolButton,
-    LineEdit, MessageBoxBase, SubtitleLabel, IconWidget
+    TableWidget, StrongBodyLabel, BodyLabel, CaptionLabel, 
+    PushButton, PrimaryPushButton, FluentIcon as FIF, InfoBar,
+    LineEdit, MessageBoxBase, SubtitleLabel, IconWidget, RoundMenu, Action
 )
+from qfluentwidgets.multimedia import StandardMediaPlayBar
 
 class RegisterDialog(MessageBoxBase):
     """ 注册音色弹窗 """
@@ -35,103 +36,15 @@ class RegisterDialog(MessageBoxBase):
         return self.nameLineEdit.text().strip()
 
 
-class HistoryCard(CardWidget):
-    def __init__(self, data, parent_interface=None):
-        super().__init__(parent_interface)
-        self.data = data
-        self.history_id = data.get("id", "")
-        self.parent_interface = parent_interface
-        self.registered_voice_id = data.get("registered_voice_id")
-        self.regBtn = None  # 保存按钮引用
-        self.statusLabel = None  # 保存标签引用
-        self.setupUI()
-
-    def _is_voice_valid(self):
-        """检查关联的音色ID是否仍在数据库中"""
-        if not self.registered_voice_id:
-            return False
-        try:
-            base_dir = Path(__file__).resolve().parent.parent.parent.parent
-            db_path = base_dir / "voice_cache" / "voices_db.json"
-            if not db_path.exists():
-                return False
-            with open(db_path, 'r', encoding='utf-8') as f:
-                db = json.load(f)
-            return self.registered_voice_id in db
-        except:
-            return False
-
-    def refreshStatus(self):
-        """外部调用：刷新当前卡片的注册状态"""
-        is_valid = self._is_voice_valid()
-        
-        # 移除旧控件
-        if self.regBtn:
-            self.regBtn.deleteLater()
-            self.regBtn = None
-        if self.statusLabel:
-            self.statusLabel.deleteLater()
-            self.statusLabel = None
-        
-        # 添加新控件
-        if not is_valid:
-            self.regBtn = PrimaryPushButton(FIF.SAVE, "注册为音色")
-            self.regBtn.clicked.connect(lambda: self.parent_interface.onRegister(self.history_id))
-            self.btnsLayout.insertWidget(1, self.regBtn)
-        else:
-            self.statusLabel = CaptionLabel("已注册至音色库")
-            self.statusLabel.setStyleSheet("color: #107c10; font-weight: bold;")
-            self.btnsLayout.insertWidget(1, self.statusLabel)
-
-    def setupUI(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        
-        # 标题与时长
-        header = QHBoxLayout()
-        header.addWidget(StrongBodyLabel(self.data.get("text", "")[:40] + "..."))
-        header.addStretch()
-        header.addWidget(CaptionLabel(f"{self.data.get('duration', 0):.2f}s"))
-        layout.addLayout(header)
-        
-        # 按钮
-        self.btnsLayout = QHBoxLayout()
-        playBtn = PushButton(FIF.PLAY, "播放")
-        playBtn.clicked.connect(lambda: self.parent_interface.onPlay(self.history_id))
-        self.btnsLayout.addWidget(playBtn)
-        
-        # 初始化状态
-        self.refreshStatus()
-        
-        delBtn = PushButton(FIF.DELETE, "删除")
-        delBtn.clicked.connect(lambda: self.parent_interface.onDelete(self.history_id))
-        self.btnsLayout.addWidget(delBtn)
-        self.btnsLayout.addStretch()
-        layout.addLayout(self.btnsLayout)
-
-class HistoryInterface(ScrollArea):
+class HistoryInterface(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("historyInterface")
         
-        # 初始化播放器 (PyQt5 风格)
-        self.player = QMediaPlayer()
-        
-        # 初始化文件系统监听器
-        self.watcher = QFileSystemWatcher()
-        self.watcher.directoryChanged.connect(self.__onDirectoryChanged)
-        
-        self.view = QWidget()
-        self.mainLayout = QVBoxLayout(self.view)
-        self.cardsLayout = QVBoxLayout()
-        self.cardsLayout.setAlignment(Qt.AlignTop)
-        
-        base_dir = Path(__file__).resolve().parent.parent.parent.parent  # 修正：多跳一层到根目录
-        self.history_dir = base_dir / "outputs" / "generation_history"
-        self.history_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 开始监听历史文件夹
-        self.watcher.addPath(str(self.history_dir))
+        # 主布局
+        self.mainLayout = QVBoxLayout(self)
+        self.mainLayout.setContentsMargins(16, 16, 16, 16)
+        self.mainLayout.setSpacing(12)
         
         # 标题栏
         titleRow = QHBoxLayout()
@@ -143,20 +56,57 @@ class HistoryInterface(ScrollArea):
         titleRow.addWidget(clearAllBtn)
         
         self.mainLayout.addLayout(titleRow)
-        self.mainLayout.addLayout(self.cardsLayout)
-        self.mainLayout.addStretch()
         
-        self.setWidget(self.view)
-        self.setWidgetResizable(True)
-        self.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
-        self.viewport().setStyleSheet("background-color: transparent;")
+        # 音频列表表格
+        self.tableView = TableWidget(self)
+        self.tableView.setBorderVisible(True)
+        self.tableView.setBorderRadius(8)
+        self.tableView.setWordWrap(False)
+        self.tableView.setColumnCount(4)
+        self.tableView.setHorizontalHeaderLabels(['文本内容', '时长', '生成时间', '状态'])
+        self.tableView.verticalHeader().hide()
+        self.tableView.setSelectionBehavior(TableWidget.SelectRows)
+        self.tableView.setSelectionMode(TableWidget.SingleSelection)
+        self.tableView.setEditTriggers(TableWidget.NoEditTriggers)
         
-        # 监听全局信号，实现跨页面状态同步
+        # 列宽设置
+        self.tableView.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tableView.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
+        self.tableView.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
+        self.tableView.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
+        self.tableView.setColumnWidth(1, 80)
+        self.tableView.setColumnWidth(2, 150)
+        self.tableView.setColumnWidth(3, 100)
+        
+        self.tableView.cellDoubleClicked.connect(self.onPlaySelected)
+        
+        self.mainLayout.addWidget(self.tableView)
+        
+        # 底部播放控制栏
+        self.playBar = StandardMediaPlayBar(self)
+        self.mainLayout.addWidget(self.playBar)
+        
+        # 路径配置
+        base_dir = Path(__file__).resolve().parent.parent.parent.parent
+        self.history_dir = base_dir / "outputs" / "generation_history"
+        self.history_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 文件系统监听
+        self.watcher = QFileSystemWatcher()
+        self.watcher.directoryChanged.connect(self.__onDirectoryChanged)
+        self.watcher.addPath(str(self.history_dir))
+        
+        # 右键菜单
+        self.tableView.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tableView.customContextMenuRequested.connect(self.showContextMenu)
+        
+        # 信号监听
         from app.common.signal_bus import signalBus
         signalBus.voiceRegistered.connect(self.__onVoiceStatusChanged)
         signalBus.voiceDeleted.connect(self.__onVoiceStatusChanged)
-        signalBus.historyGenerated.connect(self.loadHistory)  # 新记录生成时完整重载
+        signalBus.historyGenerated.connect(self.loadHistory)
         
+        # 启动加载
         QTimer.singleShot(500, self.loadHistory)
 
     def __onDirectoryChanged(self, path):
@@ -164,45 +114,83 @@ class HistoryInterface(ScrollArea):
         QTimer.singleShot(500, self.loadHistory)
 
     def __onVoiceStatusChanged(self):
-        """响应音色库变动信号，优雅地局部更新卡片状态"""
-        # 遍历所有卡片并更新状态
-        for i in range(self.cardsLayout.count()):
-            item = self.cardsLayout.itemAt(i)
-            if item and item.widget() and isinstance(item.widget(), HistoryCard):
-                item.widget().refreshStatus()
+        """响应音色库变动信号，刷新表格"""
+        self.loadHistory()
 
     def loadHistory(self):
-        # 清空旧卡片
-        while self.cardsLayout.count():
-            item = self.cardsLayout.takeAt(0)
-            if item.widget(): 
-                item.widget().deleteLater()
-            
+        """加载历史记录到表格"""
+        self.tableView.setRowCount(0)  # 清空表格
+        
         if not self.history_dir.exists():
             self.history_dir.mkdir(parents=True, exist_ok=True)
+            return
             
         folders = sorted([f for f in self.history_dir.iterdir() if f.is_dir()], reverse=True)
         
         if not folders:
-            self.cardsLayout.addWidget(BodyLabel("暂无历史记录"))
             return
             
-        for folder in folders:
+        self.tableView.setRowCount(len(folders))
+        
+        for row, folder in enumerate(folders):
             meta_file = folder / "meta.json"
             if meta_file.exists():
                 try:
                     with open(meta_file, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                    self.cardsLayout.addWidget(HistoryCard(data, self))
-                except Exception:
-                    pass
+                    
+                    # 文本内容
+                    text = data.get("text", "")[:50]
+                    if len(data.get("text", "")) > 50:
+                        text += "..."
+                    self.tableView.setItem(row, 0, QTableWidgetItem(text))
+                    self.tableView.item(row, 0).setData(Qt.UserRole, data.get("id", ""))
+                    
+                    # 时长
+                    duration = data.get('duration', 0)
+                    self.tableView.setItem(row, 1, QTableWidgetItem(f"{duration:.2f}s"))
+                    
+                    # 生成时间
+                    timestamp = data.get('timestamp', '')
+                    self.tableView.setItem(row, 2, QTableWidgetItem(timestamp))
+                    
+                    # 注册状态
+                    is_registered = data.get('registered_voice_id') and self._is_voice_valid(data.get('registered_voice_id'))
+                    status_item = QTableWidgetItem("✓ 已注册" if is_registered else "未注册")
+                    status_item.setForeground(Qt.green if is_registered else Qt.gray)
+                    self.tableView.setItem(row, 3, status_item)
+                    
+                except Exception as e:
+                    print(f"[History] Error loading {folder}: {e}")
+
+    def _is_voice_valid(self, voice_id):
+        """检查音色是否在数据库中"""
+        if not voice_id:
+            return False
+        try:
+            base_dir = Path(__file__).resolve().parent.parent.parent.parent
+            db_path = base_dir / "voice_cache" / "voices_db.json"
+            if not db_path.exists():
+                return False
+            with open(db_path, 'r', encoding='utf-8') as f:
+                db = json.load(f)
+            return voice_id in db
+        except:
+            return False
+
+    def onPlaySelected(self, row, column):
+        """双击播放选中的音频"""
+        history_id = self.tableView.item(row, 0).data(Qt.UserRole)
+        if history_id:
+            self.onPlay(history_id)
 
     def onPlay(self, history_id):
+        """播放音频"""
         audio_path = self.history_dir / history_id / "audio.wav"
         if audio_path.exists():
-            # PyQt5 使用 setMedia + QMediaContent
-            self.player.setMedia(QMediaContent(QUrl.fromLocalFile(str(audio_path))))
-            self.player.play()
+            from PyQt5.QtMultimedia import QMediaContent
+            self.playBar.player.setSource(QUrl.fromLocalFile(str(audio_path)))
+            self.playBar.play()
             InfoBar.success(title='播放', content=f"正在播放: {history_id}", parent=self)
         else:
             InfoBar.error(title='错误', content="音频文件不存在", parent=self)
@@ -282,9 +270,10 @@ class HistoryInterface(ScrollArea):
             InfoBar.success(title='成功', content=f"已注册至音色库: {name}", parent=self)
             self.loadHistory()
             
-            # 5. 触发信号通知合成界面刷新
+            # 触发信号通知其他界面
             from app.common.signal_bus import signalBus
             signalBus.voiceRegistered.emit()
+            signalBus.historyGenerated.emit()
         except Exception as e:
             InfoBar.error(title='错误', content=str(e), parent=self)
 
@@ -315,7 +304,39 @@ class HistoryInterface(ScrollArea):
             except Exception as e:
                 InfoBar.error(title='错误', content=str(e), parent=self)
 
+    def showContextMenu(self, pos):
+        """显示右键菜单"""
+        row = self.tableView.rowAt(pos.y())
+        if row < 0:
+            return
+        
+        history_id = self.tableView.item(row, 0).data(Qt.UserRole)
+        if not history_id:
+            return
+        
+        menu = RoundMenu(parent=self)
+        
+        # 播放
+        playAction = Action(FIF.PLAY, "播放")
+        playAction.triggered.connect(lambda: self.onPlay(history_id))
+        menu.addAction(playAction)
+        
+        # 注册
+        registerAction = Action(FIF.SAVE, "注册为音色")
+        registerAction.triggered.connect(lambda: self.onRegister(history_id))
+        menu.addAction(registerAction)
+        
+        menu.addSeparator()
+        
+        # 删除
+        deleteAction = Action(FIF.DELETE, "删除")
+        deleteAction.triggered.connect(lambda: self.onDelete(history_id))
+        menu.addAction(deleteAction)
+        
+        menu.exec(self.tableView.viewport().mapToGlobal(pos))
+
     def onDelete(self, history_id):
+        """删除单条记录"""
         folder = self.history_dir / history_id
         if folder.exists():
             shutil.rmtree(folder)

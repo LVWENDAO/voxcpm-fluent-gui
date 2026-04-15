@@ -1,15 +1,16 @@
 # coding:utf-8
-from PyQt5.QtCore import Qt, QTimer, QUrl, QFileSystemWatcher
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+from PyQt5.QtCore import Qt, QTimer, QUrl, QFileSystemWatcher, QPoint
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem, QHeaderView
+from PyQt5.QtGui import QIcon
 from pathlib import Path
 import json, shutil
 
 from qfluentwidgets import (
-    ScrollArea, CardWidget, StrongBodyLabel, BodyLabel, CaptionLabel, 
-    PushButton, PrimaryPushButton, FluentIcon as FIF, InfoBar, TransparentToolButton,
-    LineEdit, MessageBoxBase, SubtitleLabel, IconWidget
+    TableWidget, StrongBodyLabel, BodyLabel, CaptionLabel, 
+    PushButton, FluentIcon as FIF, InfoBar,
+    LineEdit, MessageBoxBase, SubtitleLabel, RoundMenu, Action
 )
+from qfluentwidgets.multimedia import StandardMediaPlayBar
 
 class RenameDialog(MessageBoxBase):
     """重命名对话框"""
@@ -37,74 +38,52 @@ class RenameDialog(MessageBoxBase):
         return self.nameLineEdit.text().strip()
 
 
-class VoiceCard(CardWidget):
-    def __init__(self, voice_data, parent_interface=None):
-        super().__init__(parent_interface)
-        self.voice_data = voice_data
-        self.voice_id = voice_data.get("id", "")
-        self.parent_interface = parent_interface
-        self.setupUI()
-
-    def setupUI(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
-        
-        # 标题行
-        header = QHBoxLayout()
-        self.iconWidget = IconWidget(FIF.ALBUM, self)
-        self.iconWidget.setFixedSize(24, 24)
-        header.addWidget(self.iconWidget)
-        header.addWidget(StrongBodyLabel(self.voice_data.get("name", "未命名音色")))
-        header.addStretch()
-        header.addWidget(CaptionLabel(f"ID: {self.voice_id}"))
-        layout.addLayout(header)
-        
-        # 参数展示
-        params = QHBoxLayout()
-        config = self.voice_data.get("config", {})
-        seed = config.get("seed", "N/A")
-        steps = config.get("inference_timesteps", "N/A")
-        cfg = config.get("cfg_value", "N/A")
-        
-        params.addWidget(CaptionLabel(f"Seed: {seed}"))
-        params.addWidget(CaptionLabel(f"Steps: {steps}"))
-        params.addWidget(CaptionLabel(f"CFG: {cfg}"))
-        params.addStretch()
-        layout.addLayout(params)
-        
-        # 按钮行
-        btns = QHBoxLayout()
-        playBtn = PushButton(FIF.PLAY, "试听")
-        playBtn.clicked.connect(lambda: self.parent_interface.onPlay(self.voice_id))
-        btns.addWidget(playBtn)
-        
-        renameBtn = PushButton(FIF.EDIT, "重命名")
-        renameBtn.clicked.connect(lambda: self.parent_interface.onRename(self.voice_id))
-        btns.addWidget(renameBtn)
-        
-        delBtn = PushButton(FIF.DELETE, "删除")
-        delBtn.clicked.connect(lambda: self.parent_interface.onDelete(self.voice_id))
-        btns.addWidget(delBtn)
-        btns.addStretch()
-        layout.addLayout(btns)
-
-
-class VoiceLibraryInterface(ScrollArea):
+class VoiceLibraryInterface(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("voiceLibraryInterface")
         
-        # 初始化播放器
-        self.player = QMediaPlayer()
+        # 主布局
+        self.mainLayout = QVBoxLayout(self)
+        self.mainLayout.setContentsMargins(16, 16, 16, 16)
+        self.mainLayout.setSpacing(12)
         
-        # 初始化文件系统监听器
-        self.watcher = QFileSystemWatcher()
-        self.watcher.directoryChanged.connect(self.__onDirectoryChanged)
+        # 标题栏
+        titleRow = QHBoxLayout()
+        titleRow.addWidget(StrongBodyLabel("音色库管理"))
+        titleRow.addStretch()
+        self.mainLayout.addLayout(titleRow)
         
-        self.view = QWidget()
-        self.mainLayout = QVBoxLayout(self.view)
-        self.cardsLayout = QVBoxLayout()
-        self.cardsLayout.setAlignment(Qt.AlignTop)
+        # 音色列表表格
+        self.tableView = TableWidget(self)
+        self.tableView.setBorderVisible(True)
+        self.tableView.setBorderRadius(8)
+        self.tableView.setWordWrap(False)
+        self.tableView.setColumnCount(5)
+        self.tableView.setHorizontalHeaderLabels(['音色名称', 'ID', 'Seed', 'Steps', 'CFG'])
+        self.tableView.verticalHeader().hide()
+        self.tableView.setSelectionBehavior(TableWidget.SelectRows)
+        self.tableView.setSelectionMode(TableWidget.SingleSelection)
+        self.tableView.setEditTriggers(TableWidget.NoEditTriggers)
+        
+        # 列宽设置
+        self.tableView.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tableView.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
+        self.tableView.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
+        self.tableView.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
+        self.tableView.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
+        self.tableView.setColumnWidth(1, 100)
+        self.tableView.setColumnWidth(2, 80)
+        self.tableView.setColumnWidth(3, 60)
+        self.tableView.setColumnWidth(4, 60)
+        
+        self.tableView.cellDoubleClicked.connect(self.onPlaySelected)
+        
+        self.mainLayout.addWidget(self.tableView)
+        
+        # 底部播放控制栏
+        self.playBar = StandardMediaPlayBar(self)
+        self.mainLayout.addWidget(self.playBar)
         
         # 路径配置
         base_dir = Path(__file__).resolve().parent.parent.parent.parent
@@ -112,22 +91,14 @@ class VoiceLibraryInterface(ScrollArea):
         self.voice_cache_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.voice_cache_dir / "voices_db.json"
         
-        # 开始监听
+        # 文件系统监听
+        self.watcher = QFileSystemWatcher()
+        self.watcher.directoryChanged.connect(self.__onDirectoryChanged)
         self.watcher.addPath(str(self.voice_cache_dir))
         
-        # 标题栏
-        titleRow = QHBoxLayout()
-        titleRow.addWidget(StrongBodyLabel("音色库管理"))
-        titleRow.addStretch()
-        
-        self.mainLayout.addLayout(titleRow)
-        self.mainLayout.addLayout(self.cardsLayout)
-        self.mainLayout.addStretch()
-        
-        self.setWidget(self.view)
-        self.setWidgetResizable(True)
-        self.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
-        self.viewport().setStyleSheet("background-color: transparent;")
+        # 右键菜单
+        self.tableView.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tableView.customContextMenuRequested.connect(self.showContextMenu)
         
         QTimer.singleShot(500, self.loadVoices)
 
@@ -136,14 +107,10 @@ class VoiceLibraryInterface(ScrollArea):
         QTimer.singleShot(200, self.loadVoices)
 
     def loadVoices(self):
-        # 清空旧卡片
-        while self.cardsLayout.count():
-            item = self.cardsLayout.takeAt(0)
-            if item.widget(): 
-                item.widget().deleteLater()
-            
+        """加载音色到表格"""
+        self.tableView.setRowCount(0)  # 清空表格
+        
         if not self.db_path.exists():
-            self.cardsLayout.addWidget(BodyLabel("暂无音色，请在生成历史中注册"))
             return
             
         try:
@@ -151,24 +118,79 @@ class VoiceLibraryInterface(ScrollArea):
                 voices = json.load(f)
             
             if not voices:
-                self.cardsLayout.addWidget(BodyLabel("暂无音色，请在生成历史中注册"))
                 return
                 
-            for voice_id, voice_data in voices.items():
-                self.cardsLayout.addWidget(VoiceCard(voice_data, self))
+            self.tableView.setRowCount(len(voices))
+            
+            for row, (voice_id, voice_data) in enumerate(voices.items()):
+                config = voice_data.get("config", {})
+                
+                # 音色名称
+                name_item = QTableWidgetItem(voice_data.get("name", "未命名音色"))
+                name_item.setData(Qt.UserRole, voice_id)
+                self.tableView.setItem(row, 0, name_item)
+                
+                # ID
+                self.tableView.setItem(row, 1, QTableWidgetItem(voice_id))
+                
+                # Seed
+                self.tableView.setItem(row, 2, QTableWidgetItem(str(config.get("seed", "N/A"))))
+                
+                # Steps
+                self.tableView.setItem(row, 3, QTableWidgetItem(str(config.get("inference_timesteps", "N/A"))))
+                
+                # CFG
+                self.tableView.setItem(row, 4, QTableWidgetItem(str(config.get("cfg_value", "N/A"))))
+                
         except Exception as e:
             print(f"[VoiceLibrary] Error loading voices: {e}")
-            self.cardsLayout.addWidget(BodyLabel("加载失败"))
+
+    def onPlaySelected(self, row, column):
+        """双击播放选中的音色"""
+        voice_id = self.tableView.item(row, 0).data(Qt.UserRole)
+        if voice_id:
+            self.onPlay(voice_id)
 
     def onPlay(self, voice_id):
         """播放音色预览音频"""
         preview_path = self.voice_cache_dir / voice_id / "preview.wav"
         if preview_path.exists():
-            self.player.setMedia(QMediaContent(QUrl.fromLocalFile(str(preview_path))))
-            self.player.play()
+            self.playBar.player.setSource(QUrl.fromLocalFile(str(preview_path)))
+            self.playBar.play()
             InfoBar.success(title='播放', content=f"正在试听: {voice_id}", parent=self)
         else:
             InfoBar.warning(title='提示', content="该音色暂无预览音频", parent=self)
+
+    def showContextMenu(self, pos):
+        """显示右键菜单"""
+        row = self.tableView.rowAt(pos.y())
+        if row < 0:
+            return
+        
+        voice_id = self.tableView.item(row, 0).data(Qt.UserRole)
+        if not voice_id:
+            return
+        
+        menu = RoundMenu(parent=self)
+        
+        # 试听
+        playAction = Action(FIF.PLAY, "试听")
+        playAction.triggered.connect(lambda: self.onPlay(voice_id))
+        menu.addAction(playAction)
+        
+        # 重命名
+        renameAction = Action(FIF.EDIT, "重命名")
+        renameAction.triggered.connect(lambda: self.onRename(voice_id))
+        menu.addAction(renameAction)
+        
+        menu.addSeparator()
+        
+        # 删除
+        deleteAction = Action(FIF.DELETE, "删除")
+        deleteAction.triggered.connect(lambda: self.onDelete(voice_id))
+        menu.addAction(deleteAction)
+        
+        menu.exec(self.tableView.viewport().mapToGlobal(pos))
 
     def onRename(self, voice_id):
         """重命名音色"""
