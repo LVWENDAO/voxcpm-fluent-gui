@@ -6,6 +6,12 @@ import os
 import sys
 import logging
 import tempfile
+import torch
+import random
+import numpy as np
+import json
+import hashlib
+import time
 from pathlib import Path
 from typing import Optional
 import numpy as np
@@ -27,6 +33,14 @@ app = FastAPI(title="VoxCPM2 Inference Server", version="1.0.0")
 
 # 全局模型实例
 model = None
+# 使用绝对路径，确保缓存保存在脚本所在目录的 voice_cache 文件夹
+BASE_DIR = Path(__file__).resolve().parent
+VOICE_CACHE_DIR = BASE_DIR / "voice_cache"
+VOICE_DB_PATH = VOICE_CACHE_DIR / "voices_db.json"
+VOICE_CACHE_DIR.mkdir(exist_ok=True)
+
+# 暂存最近一次推理的上下文（用于“先听后存”）
+last_generation_context = {}
 
 
 class SynthesisRequest(BaseModel):
@@ -40,6 +54,8 @@ class SynthesisRequest(BaseModel):
     output_dir: str = "./outputs"
     denoise_enabled: bool = False  # 音频降噪开关
     normalize_text: bool = True    # 文本正规范化开关
+    seed: Optional[int] = None     # 随机种子：用于复现生成结果
+    voice_id: Optional[str] = None # 音色ID：用于调用已注册的缓存
 
 
 class SynthesisResponse(BaseModel):
@@ -87,6 +103,58 @@ def startup_event():
         # 不退出，允许后续请求触发懒加载
 
 
+class VoiceRegisterRequest(BaseModel):
+    """音色注册请求（保存上次推理结果）"""
+    name: str
+
+@app.post("/save_last_voice")
+def save_last_voice(request: VoiceRegisterRequest):
+    """
+    保存最近一次推理成功的音色配置与缓存
+    """
+    if not last_generation_context:
+        raise HTTPException(status_code=400, detail="没有可用的推理记录，请先生成一次音频。")
+    
+    try:
+        ctx = last_generation_context
+        voice_id = hashlib.md5(f"{request.name}{time.time()}".encode()).hexdigest()[:8]
+        cache_path = VOICE_CACHE_DIR / f"{voice_id}.pt"
+        
+        # 保存 Prompt Cache
+        torch.save(ctx['prompt_cache'], str(cache_path))
+        
+        # 更新数据库索引
+        db = {}
+        if VOICE_DB_PATH.exists():
+            with open(VOICE_DB_PATH, 'r', encoding='utf-8') as f:
+                db = json.load(f)
+        
+        db[voice_id] = {
+            "name": request.name,
+            "path": str(cache_path),
+            "ref_audio": ctx.get('ref_audio_path'),
+            "config": ctx.get('config', {})
+        }
+        
+        with open(VOICE_DB_PATH, 'w', encoding='utf-8') as f:
+            json.dump(db, f, ensure_ascii=False, indent=4)
+            
+        return {"status": "success", "voice_id": voice_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/list_voices")
+def list_voices():
+    """获取已注册的音色列表"""
+    if not VOICE_DB_PATH.exists():
+        logger.info("[Voice List] No voices database found.")
+        return []
+    with open(VOICE_DB_PATH, 'r', encoding='utf-8') as f:
+        db = json.load(f)
+    result = [{"id": vid, **info} for vid, info in db.items()]
+    logger.info(f"[Voice List] Loaded {len(result)} voices: {[v['name'] for v in result]}")
+    return result
+
 @app.post("/generate", response_model=SynthesisResponse)
 def generate_speech(request: SynthesisRequest):
     """
@@ -97,63 +165,140 @@ def generate_speech(request: SynthesisRequest):
     2. 声音克隆: 提供 text + reference_wav_path
     3. 极致克隆: 提供 text + reference_wav_path + prompt_wav_path + prompt_text
     """
+    # 1. 注入随机种子以实现确定性生成
+    if request.seed is not None:
+        random.seed(request.seed)
+        np.random.seed(request.seed)
+        torch.manual_seed(request.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(request.seed)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+
     try:
-        # 确保模型已加载
         tts_model = load_model()
+        prompt_cache = None
+        current_seed = request.seed
+
+        # 1. 检查是否使用已注册的音色缓存
+        if request.voice_id:
+            logger.info(f"[Inference] Using registered voice_id: {request.voice_id}")
+            cache_path = VOICE_CACHE_DIR / f"{request.voice_id}.pt"
+            if cache_path.exists():
+                logger.info(f"[Inference] Loading voice cache from: {cache_path}")
+                prompt_cache = torch.load(str(cache_path), map_location="cpu")
+                
+                # 验证缓存内容
+                cache_mode = prompt_cache.get('mode', 'unknown')
+                has_audio_feat = 'audio_feat' in prompt_cache
+                audio_shape = prompt_cache.get('audio_feat', torch.tensor([])).shape if has_audio_feat else 'N/A'
+                
+                logger.info(f"[Cache Loaded] Mode: {cache_mode}")
+                logger.info(f"[Cache Loaded] Has audio_feat: {has_audio_feat}, Shape: {audio_shape}")
+                
+                # 如果音色记录里有 seed 且前端没传，则使用音色自带的 seed
+                db = {}
+                if VOICE_DB_PATH.exists():
+                    with open(VOICE_DB_PATH, 'r', encoding='utf-8') as f:
+                        db = json.load(f)
+                if request.seed is None and request.voice_id in db:
+                    current_seed = db[request.voice_id].get('config', {}).get('seed', 0)
+                    logger.info(f"[Seed] Using voice-specific seed: {current_seed}")
+                else:
+                    logger.info(f"[Seed] Using request seed: {request.seed}")
+            else:
+                logger.error(f"[Inference] Voice cache file not found: {cache_path}")
+                raise HTTPException(status_code=404, detail=f"Voice ID not found: {request.voice_id}")
+        elif request.reference_wav_path:
+            # 如果没有 voice_id 但有参考音频，则实时提取缓存
+            logger.info("[Inference] Extracting prompt cache from reference audio...")
+            prompt_cache = tts_model.tts_model.build_prompt_cache(
+                prompt_text=request.prompt_text,
+                prompt_wav_path=request.prompt_wav_path,
+                reference_wav_path=request.reference_wav_path
+            )
+            if prompt_cache:
+                logger.info(f"[Cache Built] Mode: {prompt_cache.get('mode', 'unknown')}")
+        else:
+            logger.info("[Inference] No voice_id or reference_wav_path provided, using zero-shot mode.")
+
+
+        # 2. 设置随机种子
+        if current_seed is not None:
+            random.seed(current_seed)
+            np.random.seed(current_seed)
+            torch.manual_seed(current_seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(current_seed)
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = False
+            logger.info(f"[Seed] Random seed set to: {current_seed}")
+        else:
+            logger.info("[Seed] No seed provided, using random generation.")
+
+        # 3. 执行带缓存的推理
+        logger.info(f"[Inference] Generating speech for text: {request.text[:50]}...")
+        logger.info(f"[Inference] Parameters - CFG: {request.cfg_value}, Steps: {request.inference_timesteps}")
         
-        logger.info(f"Generating speech for text: {request.text[:50]}...")
+        # 打印模型设备信息
+        model_device = next(tts_model.tts_model.parameters()).device
+        logger.info(f"[Inference] Model is running on device: {model_device}")
+
+        wav_generator = tts_model.tts_model._generate_with_prompt_cache(
+            target_text=request.text,
+            prompt_cache=prompt_cache,
+            inference_timesteps=request.inference_timesteps,
+            cfg_value=request.cfg_value,
+            min_len=2,
+            max_len=4096
+        )
         
-        # 构建生成参数
-        generate_kwargs = {
-            "text": request.text,
-            "cfg_value": request.cfg_value,
-            "inference_timesteps": request.inference_timesteps,
-            "denoise": request.denoise_enabled,      # 修正为实际支持的参数名
-            "normalize": request.normalize_text,     # 修正为实际支持的参数名
+        # 收集生成器结果
+        wav_chunks = []
+        generated_audio_feat = None
+        for wav_chunk, _, audio_feat in wav_generator:
+            wav_chunks.append(wav_chunk)
+            generated_audio_feat = audio_feat  # 保存生成的音频特征
+        wav = torch.cat(wav_chunks, dim=-1) if wav_chunks else torch.tensor([])
+
+        # 构建新的缓存（仅保留生成的 audio_feat，移除 ref_audio_feat）
+        new_cache = {
+            "audio_feat": generated_audio_feat.cpu() if generated_audio_feat is not None else None,
+            "prompt_text": request.text,
+            "mode": "continuation"
         }
+
+        # 暂存上下文供"先听后存"使用
+        global last_generation_context
+        # 确保 seed 始终为整数，便于复现
+        final_seed = current_seed if current_seed is not None else random.randint(0, 2**31 - 1)
         
-        # 添加参考音频（声音克隆）
-        if request.reference_wav_path:
-            generate_kwargs["reference_wav_path"] = request.reference_wav_path
-            
-            # 极致克隆模式
-            if request.prompt_wav_path and request.prompt_text:
-                generate_kwargs["prompt_wav_path"] = request.prompt_wav_path
-                generate_kwargs["prompt_text"] = request.prompt_text
+        last_generation_context = {
+            'prompt_cache': new_cache,
+            'ref_audio_path': request.reference_wav_path,
+            'config': {
+                'seed': final_seed,
+                'cfg_value': request.cfg_value,
+                'inference_timesteps': request.inference_timesteps
+            }
+        }
+        logger.info(f"[Context] Generation context saved with audio_feat shape: {generated_audio_feat.shape if generated_audio_feat is not None else 'None'}")
         
-        # 执行推理
-        wav = tts_model.generate(**generate_kwargs)
-        
-        # 保存音频
+
+        # 4. 保存音频
         output_dir = Path(request.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        
-        temp_file = tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=".wav",
-            dir=str(output_dir)
-        )
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav", dir=str(output_dir))
         temp_file.close()
+        sf.write(temp_file.name, wav.squeeze(0).cpu().numpy(), tts_model.tts_model.sample_rate)
         
-        sf.write(temp_file.name, wav, tts_model.tts_model.sample_rate)
+        duration = len(wav.squeeze(0).cpu().numpy()) / tts_model.tts_model.sample_rate
         
-        duration = len(wav) / tts_model.tts_model.sample_rate
-        
-        logger.info(f"Speech generated successfully. Duration: {duration:.2f}s")
-        
-        return SynthesisResponse(
-            success=True,
-            audio_path=temp_file.name,
-            duration=duration
-        )
+        return SynthesisResponse(success=True, audio_path=temp_file.name, duration=duration)
     
     except Exception as e:
         logger.error(f"Generation failed: {e}", exc_info=True)
-        return SynthesisResponse(
-            success=False,
-            error=str(e)
-        )
-
+        return SynthesisResponse(success=False, error=str(e))
 
 @app.get("/health")
 def health_check():

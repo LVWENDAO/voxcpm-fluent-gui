@@ -12,7 +12,7 @@ from qfluentwidgets import (ScrollArea, CardWidget, TitleLabel, CaptionLabel,
                             TextEdit, PlainTextEdit, Slider, SwitchButton, PrimaryPushButton, PushButton,
                             FluentIcon as FIF, InfoBar, InfoBarPosition, TransparentToolButton,
                             BodyLabel, StrongBodyLabel, ProgressRing, ToolTipFilter,
-                            IndeterminateProgressBar, isDarkTheme, qconfig, PillPushButton)
+                            IndeterminateProgressBar, isDarkTheme, qconfig, PillPushButton, LineEdit, ComboBox)
 
 from app.common.style_sheet import StyleSheet
 
@@ -473,9 +473,39 @@ class SynthesisInterface(ScrollArea):
         
         promptLayout.addLayout(tagsLayout)
 
+        # 3. 音色管理卡
+        voiceCard = CardWidget()
+        voiceLayout = QVBoxLayout(voiceCard)
+        voiceLayout.setContentsMargins(16, 12, 16, 12)
+        voiceLayout.setSpacing(8)
+        
+        voiceTitle = StrongBodyLabel("音色库")
+        
+        # 注册区域
+        regLayout = QHBoxLayout()
+        self.voiceNameInput = LineEdit()
+        self.voiceNameInput.setPlaceholderText("输入音色名称")
+        self.registerVoiceBtn = PushButton(FIF.SAVE, "注册")
+        self.registerVoiceBtn.clicked.connect(self.__onRegisterVoice)
+        regLayout.addWidget(self.voiceNameInput)
+        regLayout.addWidget(self.registerVoiceBtn)
+        
+        # 选择区域（下拉即生效）
+        self.voiceComboBox = ComboBox()
+        self.voiceComboBox.setPlaceholderText("不使用音色缓存（传统推理）")
+        self.voiceComboBox.currentIndexChanged.connect(self.__onVoiceChanged)
+        self.loadVoicesBtn = PushButton(FIF.SYNC, "刷新列表")
+        self.loadVoicesBtn.clicked.connect(self.__onLoadVoices)
+        
+        voiceLayout.addWidget(voiceTitle)
+        voiceLayout.addLayout(regLayout)
+        voiceLayout.addWidget(self.voiceComboBox)
+        voiceLayout.addWidget(self.loadVoicesBtn)
+
         leftLayout.addWidget(self.serverCard)
         leftLayout.addWidget(refCard)
         leftLayout.addWidget(promptCard)
+        leftLayout.addWidget(voiceCard)
         leftLayout.addStretch(1) # 仅保留底部弹性空间
 
         # --- 右列：目标文本 + 结果展示区 (50%) ---
@@ -581,14 +611,28 @@ class SynthesisInterface(ScrollArea):
         switchesLayout.addLayout(normalizeLayout)
         switchesLayout.addStretch()
         
+        # 随机种子设置
+        seedLayout = QHBoxLayout()
+        seedLayout.setSpacing(8)
+        self.seedInput = LineEdit()
+        self.seedInput.setPlaceholderText("留空则随机")
+        self.seedInput.setFixedWidth(120)
+        self.seedInput.setToolTip("固定种子可保证音色绝对一致，留空则每次随机")
+        self.seedInput.installEventFilter(ToolTipFilter(self.seedInput))
+        
+        seedLayout.addWidget(CaptionLabel("随机种子:"))
+        seedLayout.addWidget(self.seedInput)
+        seedLayout.addStretch()
+        
         advLayout.addWidget(advTitle)
         advLayout.addLayout(cfgStepsLayout)
         advLayout.addLayout(switchesLayout)
+        advLayout.addLayout(seedLayout)
 
         # 3. 生成按钮
         self.generateBtn = PrimaryPushButton(FIF.PLAY, "开始生成")
-        self.generateBtn.setMinimumHeight(40) # 减小按钮高度
-        self.generateBtn.setToolTip("开始语音合成，请确保已填写目标文本")
+        self.generateBtn.setMinimumHeight(40)
+        self.generateBtn.setToolTip("开始语音合成")
         self.generateBtn.installEventFilter(ToolTipFilter(self.generateBtn))
         self.generateBtn.clicked.connect(self.__onGenerateClicked)
 
@@ -694,16 +738,28 @@ class SynthesisInterface(ScrollArea):
         os.makedirs(output_dir, exist_ok=True)
         
         # 构造请求数据
+        seed_val = None
+        if self.seedInput.text().strip().isdigit():
+            seed_val = int(self.seedInput.text().strip())
+        
+        # 获取选中的 voice_id，如果是第一个选项（None）则不传
+        voice_id = None
+        current_index = self.voiceComboBox.currentIndex()
+        if current_index > 0:  # 索引 0 是“不使用音色缓存”
+            voice_id = self.voiceComboBox.itemData(current_index)
+
         payload = {
-            "text": final_text,  # 使用合并后的最终文本
-            "reference_wav_path": getattr(self, 'ref_audio_path', None),  # 修正字段名以匹配服务器
-            "prompt_wav_path": getattr(self, 'ref_audio_path', None) if self.ultimateSwitch.isChecked() else None,  # 极致克隆模式
-            "prompt_text": self.asrInput.toPlainText().strip() if self.ultimateSwitch.isChecked() else None,  # ASR文本作为prompt_text
-            "cfg_value": self.cfgSlider.value() / 10.0,  # 修正字段名
-            "inference_timesteps": self.stepsSlider.value(),  # 修正字段名
-            "output_dir": output_dir,  # 指定输出目录为 VoxCPM2 根目录下的 outputs
-            "denoise_enabled": self.denoiseSwitch.isChecked(),  # 音频降噪开关
-            "normalize_text": self.normalizeSwitch.isChecked()  # 文本正规范化开关
+            "text": final_text,
+            "reference_wav_path": getattr(self, 'ref_audio_path', None),
+            "prompt_wav_path": getattr(self, 'ref_audio_path', None) if self.ultimateSwitch.isChecked() else None,
+            "prompt_text": self.asrInput.toPlainText().strip() if self.ultimateSwitch.isChecked() else None,
+            "cfg_value": self.cfgSlider.value() / 10.0,
+            "inference_timesteps": self.stepsSlider.value(),
+            "output_dir": output_dir,
+            "denoise_enabled": self.denoiseSwitch.isChecked(),
+            "normalize_text": self.normalizeSwitch.isChecked(),
+            "seed": seed_val,
+            "voice_id": voice_id
         }
 
         request = QNetworkRequest(QUrl(f"{self.server_url}/generate"))
@@ -769,6 +825,65 @@ class SynthesisInterface(ScrollArea):
             )
         
         reply.deleteLater()
+
+    def __onRegisterVoice(self):
+        """保存最近一次推理的音色（先听后存）"""
+        name = self.voiceNameInput.text().strip()
+        if not name:
+            InfoBar.warning(title='提示', content="请输入音色名称", parent=self)
+            return
+        
+        payload = {"name": name}
+        request = QNetworkRequest(QUrl(f"{self.server_url}/save_last_voice"))
+        request.setHeader(QNetworkRequest.ContentTypeHeader, "application/json")
+        reply = self.network_manager.post(request, json.dumps(payload).encode())
+        reply.finished.connect(lambda: self.__on_voice_registered(reply))
+
+    def __on_voice_registered(self, reply):
+        if reply.error() == QNetworkReply.NoError:
+            data = json.loads(reply.readAll().data())
+            InfoBar.success(title='成功', content=f"音色已注册: {data.get('voice_id')}", parent=self)
+            self.__onLoadVoices()
+        else:
+            InfoBar.error(title='错误', content="音色注册失败", parent=self)
+        reply.deleteLater()
+
+    def __onVoiceChanged(self, index):
+        """切换音色时自动提示"""
+        if index == 0:
+            InfoBar.info(title='提示', content="已切换至传统推理模式（不使用音色缓存）", parent=self)
+        else:
+            voice_id = self.voiceComboBox.itemData(index)
+            InfoBar.info(title='提示', content=f"已切换音色: {self.voiceComboBox.itemText(index)}", parent=self)
+
+    def __onLoadVoices(self):
+        """从后端加载音色列表（懒加载）"""
+        request = QNetworkRequest(QUrl(f"{self.server_url}/list_voices"))
+        reply = self.network_manager.get(request)
+        reply.finished.connect(lambda: self.__on_voices_loaded(reply))
+
+    def __on_voices_loaded(self, reply):
+        try:
+            if reply.error() != QNetworkReply.NoError:
+                reply.deleteLater()
+                return
+            
+            data = reply.readAll().data()
+            if not data:
+                reply.deleteLater()
+                return
+            
+            voices = json.loads(data)
+            if hasattr(self, 'voiceComboBox') and self.voiceComboBox:
+                self.voiceComboBox.clear()
+                self.voiceComboBox.addItem("不使用音色缓存", userData=None)
+                for v in voices:
+                    self.voiceComboBox.addItem(v['name'], userData=v['id'])
+        except Exception as e:
+            print(f"[Voice Load] Exception: {e}")
+        finally:
+            reply.deleteLater()
+
 
     def __onUltimateModeChanged(self, checked):
         if checked:
