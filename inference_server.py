@@ -296,8 +296,6 @@ def generate_speech(request: SynthesisRequest):
         
 
         # 4. 保存音频与历史记录（后端负责归档素材，前端负责管理索引）
-        output_dir = OUTPUT_DIR
-        output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         
         # 生成历史 ID
@@ -305,14 +303,12 @@ def generate_speech(request: SynthesisRequest):
         history_folder = HISTORY_DIR / history_id
         history_folder.mkdir(parents=True, exist_ok=True)
         
-        # 保存音频
-        audio_filename = f"{timestamp}.wav"
-        audio_path = output_dir / audio_filename
-        history_audio_path = history_folder / "audio.wav"
+        # 保存音频到历史文件夹
+        audio_filename = "audio.wav"
+        audio_path = history_folder / audio_filename
         
         wav_data = wav.squeeze(0).cpu().numpy()
         sf.write(str(audio_path), wav_data, tts_model.tts_model.sample_rate)
-        sf.write(str(history_audio_path), wav_data, tts_model.tts_model.sample_rate)
         
         # 保存缓存文件 (供前端直接复制注册)
         torch.save(new_cache, str(history_folder / "cache.pt"))

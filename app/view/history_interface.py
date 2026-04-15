@@ -7,8 +7,33 @@ import json, shutil, hashlib, time
 
 from qfluentwidgets import (
     ScrollArea, CardWidget, StrongBodyLabel, BodyLabel, CaptionLabel, 
-    PushButton, PrimaryPushButton, FluentIcon as FIF, InfoBar, TransparentToolButton
+    PushButton, PrimaryPushButton, FluentIcon as FIF, InfoBar, TransparentToolButton,
+    LineEdit, MessageBoxBase, SubtitleLabel
 )
+
+class RegisterDialog(MessageBoxBase):
+    """ 注册音色弹窗 """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.titleLabel = SubtitleLabel('注册音色', self)
+        self.nameLineEdit = LineEdit(self)
+        self.nameLineEdit.setPlaceholderText('请输入音色名称...')
+        self.nameLineEdit.setClearButtonEnabled(True)
+
+        # 添加控件到布局
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addWidget(self.nameLineEdit)
+
+        # 自定义按钮文字
+        self.yesButton.setText('确认注册')
+        self.cancelButton.setText('取消')
+
+        self.widget.setMinimumWidth(350)
+
+    @property
+    def name(self):
+        return self.nameLineEdit.text().strip()
+
 
 class HistoryCard(CardWidget):
     def __init__(self, data, parent_interface=None):
@@ -127,8 +152,14 @@ class HistoryInterface(ScrollArea):
             InfoBar.error(title='错误', content="音频文件不存在", parent=self)
 
     def onRegister(self, history_id):
-        name, ok = QInputDialog.getText(self, "注册音色", "请输入名称:")
-        if not ok or not name: return
+        w = RegisterDialog(self.window())
+        if not w.exec():
+            return
+        
+        name = w.name
+        if not name:
+            InfoBar.warning(title='提示', content="名称不能为空", parent=self)
+            return
         
         base_dir = Path(__file__).resolve().parent.parent.parent
         history_folder = base_dir / "outputs" / "generation_history" / history_id
