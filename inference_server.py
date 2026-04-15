@@ -11,12 +11,13 @@ import random
 import numpy as np
 import json
 import hashlib
-import time
+import datetime
 from pathlib import Path
 from typing import Optional
 import numpy as np
 import soundfile as sf
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
 
@@ -33,11 +34,19 @@ app = FastAPI(title="VoxCPM2 Inference Server", version="1.0.0")
 
 # 全局模型实例
 model = None
-# 使用绝对路径，确保缓存保存在脚本所在目录的 voice_cache 文件夹
-BASE_DIR = Path(__file__).resolve().parent
-VOICE_CACHE_DIR = BASE_DIR / "voice_cache"
+# 路径配置：基于根目录 (VoxCPM2.exe 所在目录)
+BASE_DIR = Path(__file__).resolve().parent.parent
+OUTPUT_DIR = BASE_DIR / "outputs"
+VOICE_CACHE_DIR = OUTPUT_DIR / "voice_cache"
+HISTORY_DIR = OUTPUT_DIR / "generation_history"
 VOICE_DB_PATH = VOICE_CACHE_DIR / "voices_db.json"
-VOICE_CACHE_DIR.mkdir(exist_ok=True)
+
+# 确保目录存在
+VOICE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+if not VOICE_DB_PATH.exists():
+    with open(VOICE_DB_PATH, 'w', encoding='utf-8') as f:
+        json.dump({}, f)
 
 # 暂存最近一次推理的上下文（用于“先听后存”）
 last_generation_context = {}
@@ -64,6 +73,7 @@ class SynthesisResponse(BaseModel):
     audio_path: Optional[str] = None
     error: Optional[str] = None
     duration: Optional[float] = None
+    history_id: Optional[str] = None  # 新增：返回历史记录ID
 
 
 def load_model():
@@ -285,20 +295,74 @@ def generate_speech(request: SynthesisRequest):
         logger.info(f"[Context] Generation context saved with audio_feat shape: {generated_audio_feat.shape if generated_audio_feat is not None else 'None'}")
         
 
-        # 4. 保存音频
-        output_dir = Path(request.output_dir)
+        # 4. 保存音频与历史记录（后端负责归档素材，前端负责管理索引）
+        output_dir = OUTPUT_DIR
         output_dir.mkdir(parents=True, exist_ok=True)
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav", dir=str(output_dir))
-        temp_file.close()
-        sf.write(temp_file.name, wav.squeeze(0).cpu().numpy(), tts_model.tts_model.sample_rate)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        duration = len(wav.squeeze(0).cpu().numpy()) / tts_model.tts_model.sample_rate
+        # 生成历史 ID
+        history_id = f"{timestamp}_{hashlib.md5(request.text[:20].encode()).hexdigest()[:6]}"
+        history_folder = HISTORY_DIR / history_id
+        history_folder.mkdir(parents=True, exist_ok=True)
         
-        return SynthesisResponse(success=True, audio_path=temp_file.name, duration=duration)
+        # 保存音频
+        audio_filename = f"{timestamp}.wav"
+        audio_path = output_dir / audio_filename
+        history_audio_path = history_folder / "audio.wav"
+        
+        wav_data = wav.squeeze(0).cpu().numpy()
+        sf.write(str(audio_path), wav_data, tts_model.tts_model.sample_rate)
+        sf.write(str(history_audio_path), wav_data, tts_model.tts_model.sample_rate)
+        
+        # 保存缓存文件 (供前端直接复制注册)
+        torch.save(new_cache, str(history_folder / "cache.pt"))
+        
+        # 保存元数据
+        duration = len(wav_data) / tts_model.tts_model.sample_rate
+        meta_data = {
+            "id": history_id,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "text": request.text,
+            "seed": final_seed,
+            "cfg_value": request.cfg_value,
+            "inference_timesteps": request.inference_timesteps,
+            "duration": duration,
+            "registered": False
+        }
+        with open(history_folder / "meta.json", 'w', encoding='utf-8') as f:
+            json.dump(meta_data, f, ensure_ascii=False, indent=2)
+            
+        logger.info(f"[History] Saved to {history_folder}")
+        
+        return SynthesisResponse(success=True, audio_path=str(audio_path), duration=duration, history_id=history_id)
     
     except Exception as e:
         logger.error(f"Generation failed: {e}", exc_info=True)
         return SynthesisResponse(success=False, error=str(e))
+
+@app.get("/get_last_cache")
+def get_last_cache():
+    """获取最近一次生成的缓存文件（用于首页一键注册）"""
+    if not last_generation_context:
+        raise HTTPException(status_code=404, detail="No recent generation context found")
+    
+    try:
+        # 将内存中的缓存临时保存为文件流返回
+        cache_data = last_generation_context.get('prompt_cache')
+        if not cache_data:
+            raise HTTPException(status_code=404, detail="Cache data is empty")
+            
+        import io
+        buffer = io.BytesIO()
+        torch.save(cache_data, buffer)
+        buffer.seek(0)
+        
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(buffer, media_type="application/octet-stream", headers={
+            "Content-Disposition": "attachment; filename=last_cache.pt"
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 def health_check():

@@ -292,6 +292,10 @@ class SynthesisInterface(ScrollArea):
 
         self.__initWidget()
         self.__initLayout()
+        
+        # 监听音色注册信号，实现跨页面同步
+        from app.common.signal_bus import signalBus
+        signalBus.voiceRegistered.connect(self.__onLoadVoices)
 
     def __initWidget(self):
         self.view.setObjectName('view')
@@ -781,17 +785,22 @@ class SynthesisInterface(ScrollArea):
             # 兼容两种响应格式
             if data.get("success") or data.get("status") == "success":
                 audio_path = data.get('audio_path')
+                history_id = data.get('history_id')  # 获取历史ID
+                
+                # 保存最近一次的 history_id 供首页注册使用
+                self.last_history_id = history_id
+                
                 if audio_path and os.path.exists(audio_path):
                     # 加载音频文件，等待用户点击播放
                     self.playerCard.play_audio(audio_path)
                     
-                    # 创建自定义的成功提示，从底部弹出，10秒后自动消失，包含打开文件夹按钮
+                    # 创建自定义的成功提示
                     info_bar = InfoBar.success(
                         title='成功', 
                         content=f"音频已生成: {os.path.basename(audio_path)}", 
                         parent=self,
                         position=InfoBarPosition.BOTTOM,
-                        duration=10000  # 10秒后自动消失
+                        duration=10000
                     )
                     
                     # 添加打开文件夹按钮
@@ -813,7 +822,7 @@ class SynthesisInterface(ScrollArea):
                     content=error_msg, 
                     parent=self,
                     position=InfoBarPosition.TOP,
-                    duration=-1  # 不自动消失
+                    duration=-1
                 )
         else:
             InfoBar.error(
@@ -821,32 +830,52 @@ class SynthesisInterface(ScrollArea):
                 content="无法连接到推理服务器，请检查服务是否启动。", 
                 parent=self,
                 position=InfoBarPosition.TOP,
-                duration=-1  # 不自动消失
+                duration=-1
             )
         
         reply.deleteLater()
 
     def __onRegisterVoice(self):
-        """保存最近一次推理的音色（先听后存）"""
+        """首页一键注册：直接拷贝最近一次生成的缓存"""
         name = self.voiceNameInput.text().strip()
         if not name:
             InfoBar.warning(title='提示', content="请输入音色名称", parent=self)
             return
         
-        payload = {"name": name}
-        request = QNetworkRequest(QUrl(f"{self.server_url}/save_last_voice"))
-        request.setHeader(QNetworkRequest.ContentTypeHeader, "application/json")
-        reply = self.network_manager.post(request, json.dumps(payload).encode())
-        reply.finished.connect(lambda: self.__on_voice_registered(reply))
+        if not hasattr(self, 'last_history_id') or not self.last_history_id:
+            InfoBar.warning(title='提示', content="请先进行一次语音合成", parent=self)
+            return
 
-    def __on_voice_registered(self, reply):
-        if reply.error() == QNetworkReply.NoError:
-            data = json.loads(reply.readAll().data())
-            InfoBar.success(title='成功', content=f"音色已注册: {data.get('voice_id')}", parent=self)
+        try:
+            import shutil, hashlib, time
+            base_dir = Path(__file__).resolve().parent.parent.parent.parent  # 修正：多跳一层到根目录
+            history_folder = base_dir / "outputs" / "generation_history" / self.last_history_id
+            cache_src = history_folder / "cache.pt"
+            
+            if not cache_src.exists():
+                InfoBar.error(title='错误', content="缓存文件已丢失，请尝试在历史界面注册", parent=self)
+                return
+            
+            # 1. 生成 ID 并复制文件
+            voice_id = hashlib.md5(f"{name}{time.time()}".encode()).hexdigest()[:8]
+            voice_cache_dir = base_dir / "outputs" / "voice_cache"
+            cache_dst = voice_cache_dir / f"{voice_id}.pt"
+            shutil.copy2(str(cache_src), str(cache_dst))
+            
+            # 2. 更新 voices_db.json
+            db_path = voice_cache_dir / "voices_db.json"
+            db = {}
+            if db_path.exists():
+                with open(db_path, 'r', encoding='utf-8') as f: db = json.load(f)
+            
+            db[voice_id] = {"name": name, "path": str(cache_dst)}
+            with open(db_path, 'w', encoding='utf-8') as f:
+                json.dump(db, f, ensure_ascii=False, indent=4)
+            
+            InfoBar.success(title='成功', content=f"音色 '{name}' 已注册", parent=self)
             self.__onLoadVoices()
-        else:
-            InfoBar.error(title='错误', content="音色注册失败", parent=self)
-        reply.deleteLater()
+        except Exception as e:
+            InfoBar.error(title='错误', content=str(e), parent=self)
 
     def __onVoiceChanged(self, index):
         """切换音色时自动提示"""
@@ -857,32 +886,25 @@ class SynthesisInterface(ScrollArea):
             InfoBar.info(title='提示', content=f"已切换音色: {self.voiceComboBox.itemText(index)}", parent=self)
 
     def __onLoadVoices(self):
-        """从后端加载音色列表（懒加载）"""
-        request = QNetworkRequest(QUrl(f"{self.server_url}/list_voices"))
-        reply = self.network_manager.get(request)
-        reply.finished.connect(lambda: self.__on_voices_loaded(reply))
-
-    def __on_voices_loaded(self, reply):
+        """从本地文件系统加载音色列表（前端直读）"""
         try:
-            if reply.error() != QNetworkReply.NoError:
-                reply.deleteLater()
-                return
+            base_dir = Path(__file__).resolve().parent.parent.parent.parent  # 修正：多跳一层到根目录
+            voice_cache_dir = base_dir / "outputs" / "voice_cache"
+            db_path = voice_cache_dir / "voices_db.json"
             
-            data = reply.readAll().data()
-            if not data:
-                reply.deleteLater()
+            if not hasattr(self, 'voiceComboBox') or not self.voiceComboBox:
                 return
+
+            self.voiceComboBox.clear()
+            self.voiceComboBox.addItem("不使用音色缓存", userData=None)
             
-            voices = json.loads(data)
-            if hasattr(self, 'voiceComboBox') and self.voiceComboBox:
-                self.voiceComboBox.clear()
-                self.voiceComboBox.addItem("不使用音色缓存", userData=None)
-                for v in voices:
-                    self.voiceComboBox.addItem(v['name'], userData=v['id'])
+            if db_path.exists():
+                with open(db_path, 'r', encoding='utf-8') as f:
+                    voices = json.load(f)
+                for vid, vdata in voices.items():
+                    self.voiceComboBox.addItem(vdata['name'], userData=vid)
         except Exception as e:
-            print(f"[Voice Load] Exception: {e}")
-        finally:
-            reply.deleteLater()
+            print(f"[Voice Load] Error: {e}")
 
 
     def __onUltimateModeChanged(self, checked):
