@@ -8,7 +8,7 @@ import json, shutil, hashlib, time
 from qfluentwidgets import (
     ScrollArea, CardWidget, StrongBodyLabel, BodyLabel, CaptionLabel, 
     PushButton, PrimaryPushButton, FluentIcon as FIF, InfoBar, TransparentToolButton,
-    LineEdit, MessageBoxBase, SubtitleLabel
+    LineEdit, MessageBoxBase, SubtitleLabel, IconWidget
 )
 
 class RegisterDialog(MessageBoxBase):
@@ -41,7 +41,47 @@ class HistoryCard(CardWidget):
         self.data = data
         self.history_id = data.get("id", "")
         self.parent_interface = parent_interface
+        self.registered_voice_id = data.get("registered_voice_id")
+        self.regBtn = None  # 保存按钮引用
+        self.statusLabel = None  # 保存标签引用
         self.setupUI()
+
+    def _is_voice_valid(self):
+        """检查关联的音色ID是否仍在数据库中"""
+        if not self.registered_voice_id:
+            return False
+        try:
+            base_dir = Path(__file__).resolve().parent.parent.parent.parent
+            db_path = base_dir / "voice_cache" / "voices_db.json"
+            if not db_path.exists():
+                return False
+            with open(db_path, 'r', encoding='utf-8') as f:
+                db = json.load(f)
+            return self.registered_voice_id in db
+        except:
+            return False
+
+    def refreshStatus(self):
+        """外部调用：刷新当前卡片的注册状态"""
+        is_valid = self._is_voice_valid()
+        
+        # 移除旧控件
+        if self.regBtn:
+            self.regBtn.deleteLater()
+            self.regBtn = None
+        if self.statusLabel:
+            self.statusLabel.deleteLater()
+            self.statusLabel = None
+        
+        # 添加新控件
+        if not is_valid:
+            self.regBtn = PrimaryPushButton(FIF.SAVE, "注册为音色")
+            self.regBtn.clicked.connect(lambda: self.parent_interface.onRegister(self.history_id))
+            self.btnsLayout.insertWidget(1, self.regBtn)
+        else:
+            self.statusLabel = CaptionLabel("已注册至音色库")
+            self.statusLabel.setStyleSheet("color: #107c10; font-weight: bold;")
+            self.btnsLayout.insertWidget(1, self.statusLabel)
 
     def setupUI(self):
         layout = QVBoxLayout(self)
@@ -55,21 +95,19 @@ class HistoryCard(CardWidget):
         layout.addLayout(header)
         
         # 按钮
-        btns = QHBoxLayout()
+        self.btnsLayout = QHBoxLayout()
         playBtn = PushButton(FIF.PLAY, "播放")
         playBtn.clicked.connect(lambda: self.parent_interface.onPlay(self.history_id))
-        btns.addWidget(playBtn)
+        self.btnsLayout.addWidget(playBtn)
         
-        if not self.data.get("registered"):
-            regBtn = PrimaryPushButton(FIF.SAVE, "注册为音色")
-            regBtn.clicked.connect(lambda: self.parent_interface.onRegister(self.history_id))
-            btns.addWidget(regBtn)
+        # 初始化状态
+        self.refreshStatus()
         
         delBtn = PushButton(FIF.DELETE, "删除")
         delBtn.clicked.connect(lambda: self.parent_interface.onDelete(self.history_id))
-        btns.addWidget(delBtn)
-        btns.addStretch()
-        layout.addLayout(btns)
+        self.btnsLayout.addWidget(delBtn)
+        self.btnsLayout.addStretch()
+        layout.addLayout(self.btnsLayout)
 
 class HistoryInterface(ScrollArea):
     def __init__(self, parent=None):
@@ -100,6 +138,10 @@ class HistoryInterface(ScrollArea):
         titleRow.addWidget(StrongBodyLabel("生成历史"))
         titleRow.addStretch()
         
+        clearAllBtn = PushButton(FIF.DELETE, "清理所有记录")
+        clearAllBtn.clicked.connect(self.onClearAll)
+        titleRow.addWidget(clearAllBtn)
+        
         self.mainLayout.addLayout(titleRow)
         self.mainLayout.addLayout(self.cardsLayout)
         self.mainLayout.addStretch()
@@ -109,12 +151,25 @@ class HistoryInterface(ScrollArea):
         self.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
         self.viewport().setStyleSheet("background-color: transparent;")
         
+        # 监听全局信号，实现跨页面状态同步
+        from app.common.signal_bus import signalBus
+        signalBus.voiceRegistered.connect(self.__onVoiceStatusChanged)
+        signalBus.voiceDeleted.connect(self.__onVoiceStatusChanged)
+        signalBus.historyGenerated.connect(self.loadHistory)  # 新记录生成时完整重载
+        
         QTimer.singleShot(500, self.loadHistory)
 
     def __onDirectoryChanged(self, path):
         """当文件夹内容变化时自动刷新"""
-        # 增加一点延迟，确保文件写入完成
-        QTimer.singleShot(200, self.loadHistory)
+        QTimer.singleShot(500, self.loadHistory)
+
+    def __onVoiceStatusChanged(self):
+        """响应音色库变动信号，优雅地局部更新卡片状态"""
+        # 遍历所有卡片并更新状态
+        for i in range(self.cardsLayout.count()):
+            item = self.cardsLayout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), HistoryCard):
+                item.widget().refreshStatus()
 
     def loadHistory(self):
         # 清空旧卡片
@@ -218,8 +273,9 @@ class HistoryInterface(ScrollArea):
             with open(db_path, 'w', encoding='utf-8') as f:
                 json.dump(db, f, ensure_ascii=False, indent=4)
             
-            # 4. 标记历史为已注册
+            # 4. 标记历史并记录关联的 voice_id
             history_meta['registered'] = True
+            history_meta['registered_voice_id'] = voice_id
             with open(meta_file, 'w', encoding='utf-8') as f: 
                 json.dump(history_meta, f)
             
@@ -231,6 +287,33 @@ class HistoryInterface(ScrollArea):
             signalBus.voiceRegistered.emit()
         except Exception as e:
             InfoBar.error(title='错误', content=str(e), parent=self)
+
+    def onClearAll(self):
+        """清理所有历史记录"""
+        # 创建确认对话框
+        dialog = MessageBoxBase(self)
+        dialog.titleLabel = SubtitleLabel('确认清理', self)
+        dialog.contentLabel = BodyLabel('此操作将永久删除所有生成历史记录，且不可撤销。\n\n是否继续？', self)
+        
+        dialog.viewLayout.addWidget(dialog.titleLabel)
+        dialog.viewLayout.addWidget(dialog.contentLabel)
+        dialog.viewLayout.setSpacing(10)
+        
+        dialog.yesButton.setText('确定删除')
+        dialog.cancelButton.setText('取消')
+        dialog.yesButton.setStyleSheet("background-color: #e81123; color: white;")
+        
+        if dialog.exec():
+            try:
+                import shutil
+                if self.history_dir.exists():
+                    shutil.rmtree(self.history_dir)
+                    self.history_dir.mkdir(parents=True, exist_ok=True)
+                
+                InfoBar.success(title='成功', content="所有历史记录已清理", parent=self)
+                self.loadHistory()
+            except Exception as e:
+                InfoBar.error(title='错误', content=str(e), parent=self)
 
     def onDelete(self, history_id):
         folder = self.history_dir / history_id

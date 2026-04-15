@@ -7,6 +7,8 @@ class SignalBus(QObject):
     micaEnableChanged = pyqtSignal(bool)
     supportSignal = pyqtSignal()
     voiceRegistered = pyqtSignal()  # 音色注册完成信号
+    voiceDeleted = pyqtSignal()     # 音色删除完成信号
+    historyGenerated = pyqtSignal() # 新历史记录生成信号
 
 
 signalBus = SignalBus()

@@ -13,6 +13,7 @@ from app.common.signal_bus import signalBus
 from app.common.style_sheet import StyleSheet
 from app.view.synthesis_interface import SynthesisInterface  
 from app.view.history_interface import HistoryInterface
+from app.view.voice_library_interface import VoiceLibraryInterface
 from app.view.setting_interface import SettingInterface
 
 # 导入资源文件（确保资源被加载）
@@ -31,6 +32,7 @@ class MainWindow(FluentWindow):
         # create sub interface
         self.synthesisInterface = SynthesisInterface(self)
         self.historyInterface = HistoryInterface(self)
+        self.voiceLibraryInterface = VoiceLibraryInterface(self)
         self.settingInterface = SettingInterface(self)
 
         # enable acrylic effect
@@ -52,6 +54,7 @@ class MainWindow(FluentWindow):
         # add navigation items
         self.addSubInterface(self.synthesisInterface, FIF.MUSIC, "语音合成")
         self.addSubInterface(self.historyInterface, FIF.HISTORY, "生成历史")
+        self.addSubInterface(self.voiceLibraryInterface, FIF.ALBUM, "音色库")
         
         self.addSubInterface(
             self.settingInterface, FIF.SETTING, "设置", NavigationItemPosition.BOTTOM)

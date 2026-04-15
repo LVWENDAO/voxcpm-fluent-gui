@@ -798,6 +798,10 @@ class SynthesisInterface(ScrollArea):
                 # 保存最近一次的 history_id 供首页注册使用
                 self.last_history_id = history_id
                 
+                # 触发信号通知历史界面完整重载
+                from app.common.signal_bus import signalBus
+                signalBus.historyGenerated.emit()
+                
                 if audio_path and os.path.exists(audio_path):
                     # 加载音频文件，等待用户点击播放
                     self.playerCard.play_audio(audio_path)
@@ -911,8 +915,9 @@ class SynthesisInterface(ScrollArea):
             with open(db_path, 'w', encoding='utf-8') as f:
                 json.dump(db, f, ensure_ascii=False, indent=4)
             
-            # 标记历史为已注册
+            # 标记历史为已注册并记录 voice_id
             history_meta['registered'] = True
+            history_meta['registered_voice_id'] = voice_id
             with open(meta_file, 'w', encoding='utf-8') as f:
                 json.dump(history_meta, f)
             
@@ -920,9 +925,9 @@ class SynthesisInterface(ScrollArea):
             self.voiceNameInput.clear()
             self.__onLoadVoices()
             
-            # 触发信号通知合成界面刷新
+            # 触发信号通知历史界面完整重载
             from app.common.signal_bus import signalBus
-            signalBus.voiceRegistered.emit()
+            signalBus.historyGenerated.emit()
         except Exception as e:
             InfoBar.error(title='错误', content=str(e), parent=self)
 
@@ -930,10 +935,17 @@ class SynthesisInterface(ScrollArea):
         """切换音色时自动加载参数并回填"""
         try:
             if index == 0:
-                # 切换到无缓存模式：清空种子
+                # 切换到无缓存模式：清空种子，启用控制指令
                 self.seedInput.clear()
+                self.promptInput.setEnabled(True)
+                self.promptInput.setPlaceholderText("如：年轻女性，温柔甜美 / A warm young woman")
                 InfoBar.info(title='提示', content="已切换至传统推理模式（不使用音色缓存）", parent=self)
                 return
+            
+            # 选择音色后：禁用控制指令输入
+            self.promptInput.setEnabled(False)
+            self.promptInput.setPlaceholderText("使用音色库时不可使用控制指令")
+            self.promptInput.clear()  # 清空已输入的控制指令
             
             voice_id = self.voiceComboBox.itemData(index)
             if not voice_id:
