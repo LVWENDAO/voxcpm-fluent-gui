@@ -222,8 +222,9 @@ class VoiceLibraryInterface(ScrollArea):
             InfoBar.success(title='成功', content="音色已删除", parent=self)
             self.loadVoices()
             
-            # 触发信号通知历史界面完整重载
+            # 触发信号通知其他界面刷新
             from app.common.signal_bus import signalBus
-            signalBus.historyGenerated.emit()
+            signalBus.voiceRegistered.emit()  # 复用此信号刷新合成界面的下拉列表
+            signalBus.historyGenerated.emit()  # 通知历史界面同步状态
         except Exception as e:
             InfoBar.error(title='错误', content=str(e), parent=self)

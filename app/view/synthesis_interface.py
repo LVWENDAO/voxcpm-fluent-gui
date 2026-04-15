@@ -303,7 +303,7 @@ class SynthesisInterface(ScrollArea):
         
         # 启动时加载音色并开始监听
         base_dir = Path(__file__).resolve().parent.parent.parent.parent
-        voice_cache_dir = base_dir / "outputs" / "voice_cache"
+        voice_cache_dir = base_dir / "voice_cache"  # 修正路径，与音色库界面保持一致
         voice_cache_dir.mkdir(parents=True, exist_ok=True)
         self.watcher.addPath(str(voice_cache_dir))
         QTimer.singleShot(500, self.__onLoadVoices)
