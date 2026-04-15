@@ -7,148 +7,16 @@ from pathlib import Path
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, 
                              QLabel, QSizePolicy, QToolTip, QGridLayout)
 from PyQt5.QtGui import QDesktopServices
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from qfluentwidgets import (ScrollArea, CardWidget, TitleLabel, CaptionLabel, 
                             TextEdit, PlainTextEdit, Slider, SwitchButton, PrimaryPushButton, PushButton,
                             FluentIcon as FIF, InfoBar, InfoBarPosition, TransparentToolButton,
                             BodyLabel, StrongBodyLabel, ProgressRing, ToolTipFilter,
                             IndeterminateProgressBar, isDarkTheme, qconfig, PillPushButton, LineEdit, ComboBox)
+from qfluentwidgets.multimedia import StandardMediaPlayBar
 
 from app.common.style_sheet import StyleSheet
 
 
-class AudioPlayerCard(CardWidget):
-    """对齐 voxcpm-gui 的音频播放卡片 - 优雅版"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(72) # 稍微调矮一点更显精致
-        
-        mainLayout = QHBoxLayout(self)
-        mainLayout.setContentsMargins(20, 12, 20, 12)
-        mainLayout.setSpacing(16)
-
-        # 1. 播放/暂停按钮 (使用 TransparentToolButton 确保图标完美居中)
-        self.playBtn = TransparentToolButton(FIF.PLAY)
-        self.playBtn.setFixedSize(40, 40)
-        self.playBtn.clicked.connect(self.toggle_play)
-
-        # 2. 右侧信息区 (进度条 + 时间)
-        infoWidget = QWidget()
-        infoLayout = QVBoxLayout(infoWidget)
-        infoLayout.setContentsMargins(0, 0, 0, 0)
-        infoLayout.setSpacing(4)
-
-        # 进度条
-        self.slider = Slider(Qt.Horizontal)
-        self.slider.setRange(0, 1000)
-        self.slider.setValue(0)
-        self.slider.sliderPressed.connect(self.on_slider_pressed)
-        self.slider.sliderReleased.connect(self.on_slider_released)
-        
-        # 时间显示行
-        timeLayout = QHBoxLayout()
-        timeLayout.setContentsMargins(4, 0, 4, 0)
-        self.currentTimeLabel = CaptionLabel("00:00")
-        self.totalTimeLabel = CaptionLabel("00:00")
-        self.statusLabel = CaptionLabel("等待生成...")
-        self.statusLabel.setStyleSheet("color: gray;")
-        timeLayout.addWidget(self.currentTimeLabel)
-        timeLayout.addStretch()
-        timeLayout.addWidget(self.statusLabel)
-        timeLayout.addWidget(self.totalTimeLabel)
-
-        infoLayout.addWidget(self.slider)
-        infoLayout.addLayout(timeLayout)
-
-        # 组装主布局
-        mainLayout.addWidget(self.playBtn)
-        mainLayout.addWidget(infoWidget, 1) # 1 表示占据剩余空间
-
-        # 初始化媒体播放器 (兼容旧版 API)
-        self.media_player = QMediaPlayer(self)
-        self.is_playing = False
-        self.duration = 0
-
-        # 绑定信号
-        self.media_player.durationChanged.connect(self.on_duration_changed)
-        self.media_player.positionChanged.connect(self.on_position_changed)
-        self.media_player.stateChanged.connect(self.on_state_changed)
-        self.media_player.mediaStatusChanged.connect(self.on_media_status_changed)
-
-    def toggle_play(self):
-        if self.media_player.state() == QMediaPlayer.PlayingState:
-            # 正在播放，暂停
-            self.media_player.pause()
-        else:
-            # 暂停或停止状态，检查是否有媒体
-            if self.media_player.media().isNull():
-                return
-            # 如果已经播放完成，重置到开头
-            if self.media_player.position() >= self.duration - 100:  # 允许100ms误差
-                self.media_player.setPosition(0)
-            self.media_player.play()
-
-    def play_audio(self, audio_path):
-        """加载音频文件，但不自动播放"""
-        if not audio_path or not os.path.exists(audio_path):
-            return
-        media_content = QMediaContent(QUrl.fromLocalFile(audio_path))
-        self.media_player.setMedia(media_content)
-        # 不自动播放，等待用户点击播放按钮
-        self.is_playing = False
-        self.playBtn.setIcon(FIF.PLAY)
-        self.statusLabel.setText("准备就绪")
-
-    def on_slider_pressed(self):
-        pass
-
-    def on_slider_released(self):
-        if self.duration > 0:
-            pos = self.slider.value() / 1000.0 * self.duration
-            self.media_player.setPosition(int(pos))
-
-    def on_duration_changed(self, duration):
-        self.duration = duration
-        self.totalTimeLabel.setText(self.__format_time(duration))
-
-    def on_position_changed(self, position):
-        if not self.slider.isSliderDown() and self.duration > 0:
-            self.slider.setValue(int(position / self.duration * 1000))
-        self.currentTimeLabel.setText(self.__format_time(position))
-
-    def on_state_changed(self, state):
-        """处理播放器状态变化"""
-        if state == QMediaPlayer.StoppedState:
-            # 播放停止，还原UI
-            self.is_playing = False
-            self.playBtn.setIcon(FIF.PLAY)
-            self.statusLabel.setText("播放完成")
-        elif state == QMediaPlayer.PlayingState:
-            # 正在播放
-            self.is_playing = True
-            self.playBtn.setIcon(FIF.PAUSE)
-            self.statusLabel.setText("正在播放...")
-        elif state == QMediaPlayer.PausedState:
-            # 暂停
-            self.is_playing = False
-            self.playBtn.setIcon(FIF.PLAY)
-            self.statusLabel.setText("已暂停")
-
-    def on_media_status_changed(self, status):
-        """处理媒体状态变化"""
-        if status == QMediaPlayer.EndOfMedia:
-            # 播放完成，重置进度条和时间
-            self.slider.setValue(0)
-            self.currentTimeLabel.setText("00:00")
-            self.statusLabel.setText("播放完成")
-            self.is_playing = False
-            self.playBtn.setIcon(FIF.PLAY)
-
-    def __format_time(self, ms):
-        seconds = int(ms / 1000)
-        minutes = seconds // 60
-        seconds %= 60
-        return f"{minutes:02d}:{seconds:02d}"
 
 
 class PerformanceMonitorCard(CardWidget):
@@ -653,17 +521,17 @@ class SynthesisInterface(ScrollArea):
         self.inferenceProgressBar.setFixedHeight(3)
         self.inferenceProgressBar.setVisible(False)
 
-        # 3. 音频播放器（默认可见）
-        self.playerCard = AudioPlayerCard()
+        # 4. 底部标准播放控制栏
+        self.playBar = StandardMediaPlayBar(self)
 
-        # 4. 性能监视器
+        # 5. 性能监视器
         self.perfCard = PerformanceMonitorCard()
 
         rightLayout.addWidget(textCard)
         rightLayout.addWidget(advCard)
         rightLayout.addWidget(self.generateBtn)
         rightLayout.addWidget(self.inferenceProgressBar)  # 添加推理进度条
-        rightLayout.addWidget(self.playerCard)
+        rightLayout.addWidget(self.playBar)
         rightLayout.addWidget(self.perfCard)
         rightLayout.addStretch(1)
 
@@ -803,8 +671,11 @@ class SynthesisInterface(ScrollArea):
                 signalBus.historyGenerated.emit()
                 
                 if audio_path and os.path.exists(audio_path):
-                    # 加载音频文件，等待用户点击播放
-                    self.playerCard.play_audio(audio_path)
+                    # 使用标准播放栏加载并播放音频
+                    from PyQt5.QtCore import QUrl
+                    from PyQt5.QtMultimedia import QMediaContent
+                    self.playBar.player.setSource(QMediaContent(QUrl.fromLocalFile(audio_path)))
+                    self.playBar.play()
                     
                     # 创建自定义的成功提示
                     info_bar = InfoBar.success(
@@ -815,10 +686,20 @@ class SynthesisInterface(ScrollArea):
                         duration=10000
                     )
                     
-                    # 添加打开文件夹按钮
-                    open_folder_btn = PushButton("打开文件夹")
-                    open_folder_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(audio_path))))
-                    info_bar.addWidget(open_folder_btn)
+                    # 添加另存为按钮
+                    save_as_btn = PushButton("另存为")
+                    def on_save_as():
+                        save_path, _ = QFileDialog.getSaveFileName(
+                            self, "另存为", 
+                            os.path.basename(audio_path), 
+                            "Audio Files (*.wav *.mp3 *.flac)"
+                        )
+                        if save_path:
+                            import shutil
+                            shutil.copy2(audio_path, save_path)
+                            InfoBar.success(title='成功', content="文件已保存", parent=self, duration=2000)
+                    save_as_btn.clicked.connect(on_save_as)
+                    info_bar.addWidget(save_as_btn)
                 else:
                     InfoBar.warning(
                         title='警告', 

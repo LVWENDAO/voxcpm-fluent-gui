@@ -1,6 +1,6 @@
 # coding:utf-8
 from PyQt5.QtCore import Qt, QTimer, QUrl, QFileSystemWatcher, QSize, QPoint
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem, QHeaderView
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem, QHeaderView, QFileDialog
 from PyQt5.QtGui import QIcon
 from pathlib import Path
 import json, shutil, hashlib, time
@@ -320,6 +320,24 @@ class HistoryInterface(QWidget):
         playAction = Action(FIF.PLAY, "播放")
         playAction.triggered.connect(lambda: self.onPlay(history_id))
         menu.addAction(playAction)
+        
+        # 另存为
+        saveAsAction = Action(FIF.SAVE_AS, "另存为")
+        def on_save_as():
+            folder = self.history_dir / history_id
+            audio_file = folder / f"{history_id}.wav"
+            if not audio_file.exists():
+                return
+            save_path, _ = QFileDialog.getSaveFileName(
+                self, "另存为", 
+                f"{history_id}.wav", 
+                "Audio Files (*.wav *.mp3 *.flac)"
+            )
+            if save_path:
+                shutil.copy2(str(audio_file), save_path)
+                InfoBar.success(title='成功', content="文件已保存", parent=self, duration=2000)
+        saveAsAction.triggered.connect(on_save_as)
+        menu.addAction(saveAsAction)
         
         # 注册
         registerAction = Action(FIF.SAVE, "注册为音色")
