@@ -870,7 +870,7 @@ class SynthesisInterface(ScrollArea):
             
             # 生成 ID 并复制完整文件
             voice_id = hashlib.md5(f"{name}{time.time()}".encode()).hexdigest()[:8]
-            voice_cache_dir = base_dir / "outputs" / "voice_cache"
+            voice_cache_dir = base_dir / "voice_cache"  # 独立于 outputs
             voice_folder = voice_cache_dir / voice_id
             voice_folder.mkdir(parents=True, exist_ok=True)
             
@@ -941,7 +941,7 @@ class SynthesisInterface(ScrollArea):
             
             # 读取音色完整元数据
             base_dir = Path(__file__).resolve().parent.parent.parent.parent
-            db_path = base_dir / "outputs" / "voice_cache" / "voices_db.json"
+            db_path = base_dir / "voice_cache" / "voices_db.json"  # 独立于 outputs
             
             if db_path.exists():
                 with open(db_path, 'r', encoding='utf-8') as f:
@@ -978,21 +978,37 @@ class SynthesisInterface(ScrollArea):
     def __onLoadVoices(self):
         """从本地文件系统加载音色列表（前端直读）"""
         try:
-            base_dir = Path(__file__).resolve().parent.parent.parent.parent  # 修正：多跳一层到根目录
-            voice_cache_dir = base_dir / "outputs" / "voice_cache"
+            base_dir = Path(__file__).resolve().parent.parent.parent.parent
+            voice_cache_dir = base_dir / "voice_cache"  # 独立于 outputs
             db_path = voice_cache_dir / "voices_db.json"
             
             if not hasattr(self, 'voiceComboBox') or not self.voiceComboBox:
                 return
 
+            # 1. 记录当前选中的音色 ID
+            current_voice_id = self.voiceComboBox.currentData()
+            
+            # 2. 屏蔽信号，防止刷新过程触发 __onVoiceChanged
+            self.voiceComboBox.blockSignals(True)
             self.voiceComboBox.clear()
             self.voiceComboBox.addItem("不使用音色缓存", userData=None)
             
+            # 3. 加载新列表
             if db_path.exists():
                 with open(db_path, 'r', encoding='utf-8') as f:
                     voices = json.load(f)
                 for vid, vdata in voices.items():
                     self.voiceComboBox.addItem(vdata['name'], userData=vid)
+            
+            # 4. 恢复选中状态（如果该 ID 仍存在于列表中）
+            if current_voice_id:
+                index = self.voiceComboBox.findData(current_voice_id)
+                if index != -1:
+                    self.voiceComboBox.setCurrentIndex(index)
+                
+            # 5. 恢复信号
+            self.voiceComboBox.blockSignals(False)
+            
         except Exception as e:
             print(f"[Voice Load] Error: {e}")
 

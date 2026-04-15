@@ -37,7 +37,7 @@ model = None
 # 路径配置：基于根目录 (VoxCPM2.exe 所在目录)
 BASE_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = BASE_DIR / "outputs"
-VOICE_CACHE_DIR = OUTPUT_DIR / "voice_cache"
+VOICE_CACHE_DIR = BASE_DIR / "voice_cache"  # 独立于 outputs，防止被误删
 HISTORY_DIR = OUTPUT_DIR / "generation_history"
 VOICE_DB_PATH = VOICE_CACHE_DIR / "voices_db.json"
 

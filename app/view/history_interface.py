@@ -177,7 +177,7 @@ class HistoryInterface(ScrollArea):
         try:
             # 2. 生成 ID 并复制完整文件
             voice_id = hashlib.md5(f"{name}{time.time()}".encode()).hexdigest()[:8]
-            voice_cache_dir = base_dir / "outputs" / "voice_cache"
+            voice_cache_dir = base_dir / "voice_cache"  # 独立于 outputs
             voice_folder = voice_cache_dir / voice_id
             voice_folder.mkdir(parents=True, exist_ok=True)
             
