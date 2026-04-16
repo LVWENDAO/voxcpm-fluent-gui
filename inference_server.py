@@ -231,8 +231,24 @@ def generate_speech(request: SynthesisRequest):
         else:
             logger.info("[Seed] No seed provided, using random generation.")
 
-        # 3. 执行带缓存的推理
-        logger.info(f"[Inference] Generating speech for text: {request.text[:50]}...")
+        # 3. 文本预处理：正规范化
+        processed_text = request.text
+        if request.normalize_text:
+            logger.info("[Preprocess] Text normalization enabled")
+            try:
+                from voxcpm.utils.text_normalize import TextNormalizer
+                normalizer = TextNormalizer()
+                processed_text = normalizer.normalize(request.text)
+                logger.info(f"[Preprocess] Original: {request.text}")
+                logger.info(f"[Preprocess] Normalized: {processed_text}")
+            except Exception as e:
+                logger.warning(f"[Preprocess] Text normalization failed: {e}, using original text")
+                processed_text = request.text
+        else:
+            logger.info("[Preprocess] Text normalization disabled")
+
+        # 4. 执行带缓存的推理
+        logger.info(f"[Inference] Generating speech for text: {processed_text[:50]}...")
         logger.info(f"[Inference] Parameters - CFG: {request.cfg_value}, Steps: {request.inference_timesteps}")
         
         # 打印模型设备信息
@@ -240,7 +256,7 @@ def generate_speech(request: SynthesisRequest):
         logger.info(f"[Inference] Model is running on device: {model_device}")
 
         wav_generator = tts_model.tts_model._generate_with_prompt_cache(
-            target_text=request.text,
+            target_text=processed_text,
             prompt_cache=prompt_cache,
             inference_timesteps=request.inference_timesteps,
             cfg_value=request.cfg_value,
@@ -304,9 +320,11 @@ def generate_speech(request: SynthesisRequest):
             "id": history_id,
             "timestamp": datetime.datetime.now().isoformat(),
             "text": request.text,
+            "processed_text": processed_text if processed_text != request.text else None,
             "seed": final_seed,
             "cfg_value": request.cfg_value,
             "inference_timesteps": request.inference_timesteps,
+            "normalize_text": request.normalize_text,
             "duration": duration,
             "registered": False
         }
