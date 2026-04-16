@@ -91,7 +91,7 @@ class PerformanceMonitorCard(CardWidget):
 
             # 2. GPU 监控 (NVIDIA)
             try:
-                import nvidia-ml-py as nvml
+                import pynvml as nvml
                 nvml.nvmlInit()
                 handle = nvml.nvmlDeviceGetHandleByIndex(0)
                 
