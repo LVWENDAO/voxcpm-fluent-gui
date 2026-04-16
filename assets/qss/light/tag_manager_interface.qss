@@ -1,0 +1,25 @@
+/* 标签管理界面 - 亮色主题 */
+
+/* 内容区域背景透明 */
+#contentWidget {
+    background-color: transparent;
+}
+
+/* 分类容器：边框分隔，背景跟随主题 */
+#categoryCard {
+    background-color: transparent;
+    border: 1px solid rgba(0, 0, 0, 0.0578);
+    border-radius: 8px;
+}
+
+/* 空标签提示 */
+#emptyTagLabel {
+    color: rgba(0, 0, 0, 0.45);
+    padding: 8px;
+}
+
+/* 滚动区域 */
+#scrollArea {
+    border: none;
+    background-color: transparent;
+}

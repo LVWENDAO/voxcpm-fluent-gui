@@ -414,6 +414,9 @@ class SynthesisInterface(ScrollArea):
         promptLayout.addWidget(promptTitle)
         promptLayout.addWidget(self.promptInput)
         
+        # 连接文本变化信号，实现双向同步
+        self.promptInput.textChanged.connect(self.__sync_tags_from_text)
+        
         # 分类导航栏（使用流式布局支持自动换行）
         self.categoryNavWidget = QWidget()
         self.categoryNavLayout = FlowLayout(self.categoryNavWidget, margin=0, h_spacing=6, v_spacing=4)
@@ -969,7 +972,7 @@ class SynthesisInterface(ScrollArea):
         """切换音色时自动加载参数并回填"""
         try:
             if index == 0:
-                # 传统模式：恢复默认随机状态
+                # 传统模式：恢复默认随机状态，启用控制指令输入框
                 self.randomSeedSwitch.setChecked(True)
                 self.seedInput.clear()
                 self.stepsSlider.setValue(25)
@@ -979,11 +982,11 @@ class SynthesisInterface(ScrollArea):
                 InfoBar.info(title='提示', content="已切换至传统推理模式（不使用音色缓存）", parent=self)
                 return
             
-            # 音色模式：切换到固定模式并回填
+            # 音色模式：切换到固定模式，禁用控制指令输入框（但保留内容）
             self.randomSeedSwitch.setChecked(False)
             self.promptInput.setEnabled(False)
             self.promptInput.setPlaceholderText("使用音色库时不可使用控制指令")
-            self.promptInput.clear()
+            # 不再清空用户输入，保护手动输入或标签内容
             
             voice_id = self.voiceComboBox.itemData(index)
             if not voice_id:
@@ -1101,19 +1104,59 @@ class SynthesisInterface(ScrollArea):
         """切换控制指令文本（添加或移除指定文本片段）"""
         target_text = text.strip()
         
+        # 获取当前完整文本
+        current_text = self.promptInput.toPlainText().strip()
+        
+        # 提取所有标签（用逗号分隔的独立片段）
+        parts = [p.strip() for p in current_text.split('，') if p.strip()]
+        
         # 切换选中状态
-        if target_text in self.selected_tags:
-            self.selected_tags.remove(target_text)
+        if target_text in parts:
+            parts.remove(target_text)
+            self.selected_tags.discard(target_text)
         else:
+            parts.append(target_text)
             self.selected_tags.add(target_text)
         
         # 重新组合文本
-        if self.selected_tags:
-            new_text = '，'.join(sorted(self.selected_tags))  # 排序以保持一致性
-        else:
-            new_text = ''
+        new_text = '，'.join(parts) if parts else ''
         
+        # 临时断开信号，防止触发同步循环
+        self.promptInput.blockSignals(True)
         self.promptInput.setPlainText(new_text)
+        self.promptInput.blockSignals(False)
+        
+        # 更新当前分类下的按钮状态
+        self.__update_tag_buttons_state()
+    
+    def __sync_tags_from_text(self):
+        """当用户手动修改文本时，同步标签按钮状态"""
+        current_text = self.promptInput.toPlainText().strip()
+        if not current_text:
+            # 文本为空，清空所有选中状态
+            self.selected_tags.clear()
+            self.__update_tag_buttons_state()
+            return
+        
+        # 提取当前文本中的所有片段
+        parts = [p.strip() for p in current_text.split('，') if p.strip()]
+        
+        # 找出被移除的标签
+        removed_tags = self.selected_tags - set(parts)
+        # 找出新增的标签
+        added_tags = set(parts) - self.selected_tags
+        
+        # 更新选中集合
+        self.selected_tags -= removed_tags
+        self.selected_tags |= added_tags
+        
+        # 更新按钮状态
+        self.__update_tag_buttons_state()
+    
+    def __update_tag_buttons_state(self):
+        """更新当前可见标签按钮的选中状态"""
+        for tag_text, btn in self.tag_buttons.items():
+            btn.setChecked(tag_text in self.selected_tags)
     
     def __load_dynamic_tags(self):
         """从标签管理系统动态加载标签"""

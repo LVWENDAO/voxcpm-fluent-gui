@@ -15,5 +15,7 @@
         <file alias="dark/logs_interface.qss">assets/qss/dark/logs_interface.qss</file>
         <file alias="light/setting_interface.qss">assets/qss/light/setting_interface.qss</file>
         <file alias="dark/setting_interface.qss">assets/qss/dark/setting_interface.qss</file>
+        <file alias="light/tag_manager_interface.qss">assets/qss/light/tag_manager_interface.qss</file>
+        <file alias="dark/tag_manager_interface.qss">assets/qss/dark/tag_manager_interface.qss</file>
     </qresource>
 </RCC>
