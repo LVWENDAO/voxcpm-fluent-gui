@@ -12,6 +12,7 @@ import numpy as np
 import json
 import hashlib
 import datetime
+import threading
 from pathlib import Path
 from typing import Optional
 import numpy as np
@@ -175,26 +176,28 @@ def generate_speech(request: SynthesisRequest):
     2. 声音克隆: 提供 text + reference_wav_path
     3. 极致克隆: 提供 text + reference_wav_path + prompt_wav_path + prompt_text
     """
-    # 1. 注入随机种子以实现确定性生成
+    # 1. 设置随机种子（仅接受前端传来的值，不自行产生）
     if request.seed is not None:
-        random.seed(request.seed)
-        np.random.seed(request.seed)
-        torch.manual_seed(request.seed)
+        current_seed = request.seed
+        random.seed(current_seed)
+        np.random.seed(current_seed)
+        torch.manual_seed(current_seed)
         if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(request.seed)
+            torch.cuda.manual_seed_all(current_seed)
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
+        logger.info(f"[Seed] Using request seed: {current_seed}")
+    else:
+        logger.warning("[Seed] No seed provided by frontend, using default system randomness")
 
     try:
         tts_model = load_model()
         prompt_cache = None
-        current_seed = request.seed
 
-        # 1. 检查是否使用已注册的音色缓存
+        # 检查是否使用已注册的音色缓存
         if request.voice_id:
             logger.info(f"[Inference] Using registered voice_id: {request.voice_id}")
             
-            # 新结构：{voice_id}/cache.pt
             cache_path = VOICE_CACHE_DIR / request.voice_id / "cache.pt"
             
             if not cache_path.exists():
@@ -204,29 +207,13 @@ def generate_speech(request: SynthesisRequest):
             logger.info(f"[Inference] Loading voice cache from: {cache_path}")
             prompt_cache = torch.load(str(cache_path), map_location="cpu")
             
-            # 验证缓存内容
             cache_mode = prompt_cache.get('mode', 'unknown')
             has_audio_feat = 'audio_feat' in prompt_cache
             audio_shape = prompt_cache.get('audio_feat', torch.tensor([])).shape if has_audio_feat else 'N/A'
             
             logger.info(f"[Cache Loaded] Mode: {cache_mode}")
             logger.info(f"[Cache Loaded] Has audio_feat: {has_audio_feat}, Shape: {audio_shape}")
-            
-            # 如果音色记录里有 seed 且前端没传，则使用音色自带的 seed
-            db = {}
-            if VOICE_DB_PATH.exists():
-                with open(VOICE_DB_PATH, 'r', encoding='utf-8') as f:
-                    db = json.load(f)
-            
-            voice_seed = db.get(request.voice_id, {}).get('config', {}).get('seed', None)
-            if voice_seed is not None:
-                if request.seed is None:
-                    current_seed = voice_seed
-                    logger.info(f"[Seed] Using voice-specific seed: {current_seed}")
-                else:
-                    logger.info(f"[Seed] Using request seed: {request.seed} (overriding voice seed: {voice_seed})")
-            else:
-                logger.info(f"[Seed] No voice seed configured, using request seed: {request.seed}")
+            logger.info(f"[Seed] Using request seed: {current_seed}")
         elif request.reference_wav_path:
             # 如果没有 voice_id 但有参考音频，则实时提取缓存
             logger.info("[Inference] Extracting prompt cache from reference audio...")
@@ -378,6 +365,18 @@ def health_check():
 
 
 if __name__ == "__main__":
+    # 启动前端监听守护线程（工业标准方案）
+    def _monitor_frontend():
+        """监听前端进程状态：前端退出时 stdin 管道会自动关闭（EOF），后端随之退出"""
+        try:
+            sys.stdin.read()  # 阻塞读取，前端退出时自动收到 EOF
+        except Exception:
+            pass
+        logger.info("[后端] 检测到前端退出，自动关闭服务")
+        sys.exit(0)
+
+    threading.Thread(target=_monitor_frontend, daemon=True).start()
+    
     # 启动服务器
     uvicorn.run(
         app,

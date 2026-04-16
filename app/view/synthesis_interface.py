@@ -491,16 +491,28 @@ class SynthesisInterface(ScrollArea):
         switchesLayout.addLayout(normalizeLayout)
         switchesLayout.addStretch()
         
-        # 随机种子设置
+        # 随机种子设置（开关与输入框同行，风格与上方开关一致）
         seedLayout = QHBoxLayout()
         seedLayout.setSpacing(8)
-        self.seedInput = LineEdit()
-        self.seedInput.setPlaceholderText("留空则随机")
-        self.seedInput.setFixedWidth(120)
-        self.seedInput.setToolTip("固定种子可保证音色绝对一致，留空则每次随机")
-        self.seedInput.installEventFilter(ToolTipFilter(self.seedInput))
         
-        seedLayout.addWidget(CaptionLabel("随机种子:"))
+        # 随机开关
+        self.randomSeedSwitch = SwitchButton()
+        self.randomSeedSwitch.setOnText("随机")
+        self.randomSeedSwitch.setOffText("固定")
+        self.randomSeedSwitch.setChecked(True)  # 默认开启随机
+        self.randomSeedSwitch.checkedChanged.connect(self.__onRandomSeedToggled)
+        seedLayout.addWidget(self.randomSeedSwitch)
+        seedLayout.addWidget(CaptionLabel("种子模式"))
+        seedLayout.addSpacing(16)
+        
+        # Seed 输入框
+        seedLayout.addWidget(CaptionLabel("种子值:"))
+        self.seedInput = LineEdit()
+        self.seedInput.setPlaceholderText("随机生成中...")
+        self.seedInput.setFixedWidth(120)
+        self.seedInput.setEnabled(False)  # 默认禁用（随机模式）
+        self.seedInput.setToolTip("固定模式下可手动输入种子值，随机模式下显示上次生成的值")
+        self.seedInput.installEventFilter(ToolTipFilter(self.seedInput))
         seedLayout.addWidget(self.seedInput)
         seedLayout.addStretch()
         
@@ -617,10 +629,25 @@ class SynthesisInterface(ScrollArea):
         output_dir = str(voxcpm2_root / "outputs")
         os.makedirs(output_dir, exist_ok=True)
         
-        # 构造请求数据
-        seed_val = None
-        if self.seedInput.text().strip().isdigit():
-            seed_val = int(self.seedInput.text().strip())
+        # 构造请求数据（前端驱动：随机模式由前端产生 Seed）
+        import random
+        
+        if self.randomSeedSwitch.isChecked():
+            # 随机模式：前端生成随机 Seed 并填入输入框
+            seed_val = random.randint(0, 2**32 - 1)
+            self.seedInput.setText(str(seed_val))
+        else:
+            # 固定模式：检查用户是否填写了有效值
+            seed_text = self.seedInput.text().strip()
+            if not seed_text.isdigit():
+                InfoBar.warning(title='提示', content="固定模式下，请填写有效的种子数值", parent=self)
+                self.inferenceProgressBar.stop()
+                self.inferenceProgressBar.setVisible(False)
+                self.generateBtn.setEnabled(True)
+                self.generateBtn.setText("开始生成")
+                self.generateBtn.setToolTip("开始语音合成")
+                return
+            seed_val = int(seed_text)
         
         # 获取选中的 voice_id，如果是第一个选项（None）则不传
         voice_id = None
@@ -812,29 +839,44 @@ class SynthesisInterface(ScrollArea):
         except Exception as e:
             InfoBar.error(title='错误', content=str(e), parent=self)
 
+    def __onRandomSeedToggled(self, is_random):
+        """处理随机开关切换"""
+        if is_random:
+            # 随机模式：禁用输入框，显示提示
+            self.seedInput.setEnabled(False)
+            self.seedInput.setPlaceholderText("每次生成将自动产生随机种子")
+        else:
+            # 固定模式：启用输入框，等待用户输入
+            self.seedInput.setEnabled(True)
+            self.seedInput.setPlaceholderText("请输入固定种子值")
+            self.seedInput.setFocus()
+
     def __onVoiceChanged(self, index):
         """切换音色时自动加载参数并回填"""
         try:
             if index == 0:
-                # 切换到无缓存模式：清空种子，启用控制指令
+                # 传统模式：恢复默认随机状态
+                self.randomSeedSwitch.setChecked(True)
                 self.seedInput.clear()
+                self.stepsSlider.setValue(25)
+                self.cfgSlider.setValue(50)
                 self.promptInput.setEnabled(True)
                 self.promptInput.setPlaceholderText("如：年轻女性，温柔甜美 / A warm young woman")
                 InfoBar.info(title='提示', content="已切换至传统推理模式（不使用音色缓存）", parent=self)
                 return
             
-            # 选择音色后：禁用控制指令输入
+            # 音色模式：切换到固定模式并回填
+            self.randomSeedSwitch.setChecked(False)
             self.promptInput.setEnabled(False)
             self.promptInput.setPlaceholderText("使用音色库时不可使用控制指令")
-            self.promptInput.clear()  # 清空已输入的控制指令
+            self.promptInput.clear()
             
             voice_id = self.voiceComboBox.itemData(index)
             if not voice_id:
                 return
             
-            # 读取音色完整元数据
             base_dir = Path(__file__).resolve().parent.parent.parent.parent
-            db_path = base_dir / "voice_cache" / "voices_db.json"  # 独立于 outputs
+            db_path = base_dir / "voice_cache" / "voices_db.json"
             
             if db_path.exists():
                 with open(db_path, 'r', encoding='utf-8') as f:
@@ -842,23 +884,23 @@ class SynthesisInterface(ScrollArea):
                 
                 if voice_id in db:
                     voice_data = db[voice_id]
+                    config = voice_data.get('config', {})
                     
-                    # 回填 seed
-                    seed = voice_data.get('config', {}).get('seed', '')
-                    self.seedInput.setText(str(seed) if seed else '')
+                    # 1. 填充 Seed
+                    seed = config.get('seed', '')
+                    self.seedInput.setText(str(seed) if seed is not None else "")
                     
-                    # 回填 inference_timesteps 和 cfg_value
-                    inference_timesteps = voice_data.get('config', {}).get('inference_timesteps', 32)
-                    cfg_value = voice_data.get('config', {}).get('cfg_value', 4.0)
+                    # 2. 填充 Steps (inference_timesteps)
+                    steps = config.get('inference_timesteps', 25)
+                    self.stepsSlider.setValue(int(steps))
                     
-                    if hasattr(self, 'inferenceTimestepsSpin'):
-                        self.inferenceTimestepsSpin.setValue(inference_timesteps)
-                    if hasattr(self, 'cfgValueSpin'):
-                        self.cfgValueSpin.setValue(cfg_value)
+                    # 3. 填充 CFG (cfg_value * 10)
+                    cfg = config.get('cfg_value', 5.0)
+                    self.cfgSlider.setValue(int(float(cfg) * 10))
                     
                     InfoBar.success(
                         title='已加载音色参数',
-                        content=f"Seed: {seed} | Steps: {inference_timesteps} | CFG: {cfg_value}",
+                        content=f"Seed: {seed} | Steps: {steps} | CFG: {cfg}",
                         parent=self
                     )
         except Exception as e:
