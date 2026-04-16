@@ -103,56 +103,53 @@ class FlowLayout(QLayout):
 
 
 class PerformanceMonitorCard(CardWidget):
-    """性能监视器卡片 - 图形化展示版"""
+    """性能监视器卡片 - 紧凑化图形展示版"""
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
+        layout.setContentsMargins(16, 10, 16, 10)  # 减小内边距
+        layout.setSpacing(8)  # 减小组件间距
 
-        title = StrongBodyLabel("性能监视器")
-        
         # 监控项容器
         monitorsLayout = QHBoxLayout()
-        monitorsLayout.setSpacing(20)
+        monitorsLayout.setSpacing(0)  # 零间距，均匀分配
 
         # 1. GPU 监控
         self.gpuRing = ProgressRing()
-        self.gpuRing.setFixedSize(60, 60)
+        self.gpuRing.setFixedSize(40, 40)
         self.gpuRing.setTextVisible(True)
         self.gpuInfo = CaptionLabel("GPU: --%")
         gpuLayout = QVBoxLayout()
+        gpuLayout.setSpacing(2)
         gpuLayout.setAlignment(Qt.AlignCenter)
         gpuLayout.addWidget(self.gpuRing, 0, Qt.AlignHCenter)
         gpuLayout.addWidget(self.gpuInfo, 0, Qt.AlignHCenter)
-        monitorsLayout.addLayout(gpuLayout)
-        monitorsLayout.addStretch(1) # 均分空间
+        monitorsLayout.addLayout(gpuLayout, 1)
 
         # 2. 显存监控
         self.vramRing = ProgressRing()
-        self.vramRing.setFixedSize(60, 60)
+        self.vramRing.setFixedSize(40, 40)
         self.vramRing.setTextVisible(False)
         self.vramInfo = CaptionLabel("显存: -- / -- GB")
         vramLayout = QVBoxLayout()
+        vramLayout.setSpacing(2)
         vramLayout.setAlignment(Qt.AlignCenter)
         vramLayout.addWidget(self.vramRing, 0, Qt.AlignHCenter)
         vramLayout.addWidget(self.vramInfo, 0, Qt.AlignHCenter)
-        monitorsLayout.addLayout(vramLayout)
-        monitorsLayout.addStretch(1) # 均分空间
+        monitorsLayout.addLayout(vramLayout, 1)
 
         # 3. 内存监控
         self.ramRing = ProgressRing()
-        self.ramRing.setFixedSize(60, 60)
+        self.ramRing.setFixedSize(40, 40)
         self.ramRing.setTextVisible(False)
         self.ramInfo = CaptionLabel("内存: -- / -- GB")
         ramLayout = QVBoxLayout()
+        ramLayout.setSpacing(2)
         ramLayout.setAlignment(Qt.AlignCenter)
         ramLayout.addWidget(self.ramRing, 0, Qt.AlignHCenter)
         ramLayout.addWidget(self.ramInfo, 0, Qt.AlignHCenter)
-        monitorsLayout.addLayout(ramLayout)
-        monitorsLayout.addStretch(1) # 均分空间
+        monitorsLayout.addLayout(ramLayout, 1)
 
-        layout.addWidget(title)
         layout.addLayout(monitorsLayout)
 
         # 模拟数据更新
@@ -306,10 +303,17 @@ class SynthesisInterface(ScrollArea):
         self.startServerBtn = PushButton(FIF.PLAY, "启动服务")
         self.startServerBtn.setFixedWidth(140)
         self.startServerBtn.clicked.connect(self.__toggle_server)
+        
+        # 折叠/展开按钮
+        self.toggleLogBtn = TransparentToolButton(FIF.CARE_DOWN_SOLID)
+        self.toggleLogBtn.setFixedSize(32, 32)
+        self.toggleLogBtn.clicked.connect(self.__toggle_server_log)
+        
         serverHeader.addWidget(statusLabel)
         serverHeader.addWidget(self.statusIndicator)
         serverHeader.addStretch()
         serverHeader.addWidget(self.startServerBtn)
+        serverHeader.addWidget(self.toggleLogBtn)
 
         # 添加服务器启动进度条（初始隐藏）
         self.serverProgressBar = IndeterminateProgressBar(self)
@@ -320,6 +324,10 @@ class SynthesisInterface(ScrollArea):
         # 优化日志卡片内部间距
         self.serverLogCard.layout().setContentsMargins(16, 8, 16, 8)
         self.serverLogCard.logArea.setMaximumHeight(120) # 限制高度
+        
+        # 默认折叠日志
+        self.serverLogVisible = False
+        self.serverLogCard.setVisible(False)
 
         serverLayout.addLayout(serverHeader)
         serverLayout.addWidget(self.serverProgressBar)
@@ -383,13 +391,13 @@ class SynthesisInterface(ScrollArea):
         # 3. 控制指令卡 (高度自适应)
         promptCard = CardWidget()
         promptLayout = QVBoxLayout(promptCard)
-        promptLayout.setContentsMargins(16, 12, 16, 12)
-        promptLayout.setSpacing(8)
+        promptLayout.setContentsMargins(16, 8, 16, 8)  # 减小上下内边距
+        promptLayout.setSpacing(4)  # 减小组件间距
         
         promptTitle = StrongBodyLabel("控制指令（可选）")
         self.promptInput = PlainTextEdit()
         self.promptInput.setPlaceholderText("如：年轻女性，温柔甜美 / A warm young woman")
-        self.promptInput.setMaximumHeight(60)  # 限制为最多两行文本高度
+        self.promptInput.setMaximumHeight(48)  # 减少1/5高度 (60 -> 48)
         self.promptInput.setToolTip("通过文字描述生成目标音色，无需参考音频")
         self.promptInput.installEventFilter(ToolTipFilter(self.promptInput))
         
@@ -659,6 +667,15 @@ class SynthesisInterface(ScrollArea):
         self.ref_audio_path = None
         self.uploadBtn.setText("上传参考音频")
         self.uploadBtn.setIcon(FIF.FOLDER_ADD)
+
+    def __toggle_server_log(self):
+        """切换服务器日志的显示/折叠状态"""
+        self.serverLogVisible = not self.serverLogVisible
+        self.serverLogCard.setVisible(self.serverLogVisible)
+        if self.serverLogVisible:
+            self.toggleLogBtn.setIcon(FIF.CARE_UP_SOLID)
+        else:
+            self.toggleLogBtn.setIcon(FIF.CARE_DOWN_SOLID)
 
     def __onGenerateClicked(self):
         text = self.textInput.toPlainText().strip()
