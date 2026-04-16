@@ -542,7 +542,12 @@ class SynthesisInterface(ScrollArea):
         path, _ = QFileDialog.getOpenFileName(self, "选择参考音频", "", "Audio Files (*.wav *.mp3 *.flac)")
         if path:
             self.ref_audio_path = path  # 保存参考音频路径
-            self.uploadBtn.setText(f"已选择: {os.path.basename(path)}")
+            filename = os.path.basename(path)
+            # 限制显示长度，超过20字符截断
+            if len(filename) > 20:
+                name, ext = os.path.splitext(filename)
+                filename = name[:17] + "..." + ext
+            self.uploadBtn.setText(f"已选择: {filename}")
             self.uploadBtn.setIcon(FIF.ACCEPT)
 
         # 初始化网络管理器用于 HTTP 通信

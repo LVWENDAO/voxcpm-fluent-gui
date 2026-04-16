@@ -347,19 +347,9 @@ class TagManagerInterface(QWidget):
         # 清空现有标签
         self.tagTabBar.clear()
                 
-        # 显示/隐藏空状态提示
-        if not tags:
-            self.emptyLabel.setVisible(True)
-            if search_text:
-                self.emptyLabel.setText('未找到匹配的标签')
-            else:
-                self.emptyLabel.setText('点击"添加标签"按钮开始创建标签')
-        else:
-            self.emptyLabel.setVisible(False)
-                    
-            # 添加标签到 TabBar
-            for tag_data in tags:
-                self.tagTabBar.addTag(tag_data['text'], tag_data.get('icon'))
+        # 添加标签到 TabBar
+        for tag_data in tags:
+            self.tagTabBar.addTag(tag_data['text'], tag_data.get('icon'))
         
         # 更新统计
         total_tags = len(category_data.get('tags', []))
@@ -456,8 +446,6 @@ class TagManagerInterface(QWidget):
             
             # 清空标签显示
             self.tagTabBar.clear()
-            self.emptyLabel.setVisible(True)
-            self.emptyLabel.setText('点击“添加分类”按钮开始创建分类')
             self.currentCategoryLabel.setText("未选择分类")
             self.statsLabel.setText("")
             

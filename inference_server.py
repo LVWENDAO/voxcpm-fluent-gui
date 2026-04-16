@@ -213,19 +213,9 @@ def generate_speech(request: SynthesisRequest):
             
             logger.info(f"[Cache Loaded] Mode: {cache_mode}")
             logger.info(f"[Cache Loaded] Has audio_feat: {has_audio_feat}, Shape: {audio_shape}")
-            logger.info(f"[Seed] Using request seed: {current_seed}")
-        elif request.reference_wav_path:
-            # 如果没有 voice_id 但有参考音频，则实时提取缓存
-            logger.info("[Inference] Extracting prompt cache from reference audio...")
-            prompt_cache = tts_model.tts_model.build_prompt_cache(
-                prompt_text=request.prompt_text,
-                prompt_wav_path=request.prompt_wav_path,
-                reference_wav_path=request.reference_wav_path
-            )
-            if prompt_cache:
-                logger.info(f"[Cache Built] Mode: {prompt_cache.get('mode', 'unknown')}")
         else:
-            logger.info("[Inference] No voice_id or reference_wav_path provided, using zero-shot mode.")
+            logger.info("[Inference] No voice_id provided, using reference audio directly.")
+            # 不构建缓存，直接使用参考音频路径
 
 
         # 2. 设置随机种子
