@@ -91,7 +91,7 @@ class PerformanceMonitorCard(CardWidget):
 
             # 2. GPU 监控 (NVIDIA)
             try:
-                import pynvml as nvml
+                import nvidia-ml-py as nvml
                 nvml.nvmlInit()
                 handle = nvml.nvmlDeviceGetHandleByIndex(0)
                 
@@ -535,6 +535,10 @@ class SynthesisInterface(ScrollArea):
 
         # 4. 底部标准播放控制栏
         self.playBar = StandardMediaPlayBar(self)
+        
+        # 注册到全局音频管理器
+        from app.common.audio_manager import audioManager
+        audioManager.register_player(self.playBar)
 
         # 5. 性能监视器
         self.perfCard = PerformanceMonitorCard()

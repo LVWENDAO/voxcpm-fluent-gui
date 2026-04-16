@@ -83,6 +83,11 @@ class VoiceLibraryInterface(QWidget):
         
         # 底部播放控制栏
         self.playBar = StandardMediaPlayBar(self)
+        
+        # 注册到全局音频管理器
+        from app.common.audio_manager import audioManager
+        audioManager.register_player(self.playBar)
+        
         self.mainLayout.addWidget(self.playBar)
         
         # 路径配置

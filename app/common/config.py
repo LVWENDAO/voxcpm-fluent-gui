@@ -39,6 +39,10 @@ class Config(QConfig):
     
     # material
     blurRadius = RangeConfigItem("Material", "AcrylicBlurRadius", 15, RangeValidator(0, 40))
+    
+    # audio settings
+    globalVolume = RangeConfigItem("Audio", "GlobalVolume", 30, RangeValidator(0, 100))
+    globalMuted = ConfigItem("Audio", "GlobalMuted", False, BoolValidator())
 
 
 cfg = Config()
