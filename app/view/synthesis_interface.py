@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, 
-                             QLabel, QSizePolicy, QToolTip, QGridLayout)
+                             QLabel, QSizePolicy, QToolTip, QGridLayout, QScrollArea)
 from PyQt5.QtGui import QDesktopServices
 from qfluentwidgets import (ScrollArea, CardWidget, TitleLabel, CaptionLabel, 
                             TextEdit, PlainTextEdit, Slider, SwitchButton, PrimaryPushButton, PushButton,
@@ -169,6 +169,9 @@ class SynthesisInterface(ScrollArea):
         from app.common.signal_bus import signalBus
         signalBus.voiceRegistered.connect(self.__onLoadVoices)
         
+        # 监听标签更新信号，实现动态标签同步
+        signalBus.tagToggled.connect(self.__on_tag_toggled_from_manager)
+        
         # 启动时加载音色并开始监听
         base_dir = Path(__file__).resolve().parent.parent.parent.parent
         voice_cache_dir = base_dir / "voice_cache"  # 修正路径，与音色库界面保持一致
@@ -311,50 +314,31 @@ class SynthesisInterface(ScrollArea):
         self.promptOriginalText = ""
         # 添加选中的标签集合
         self.selected_tags = set()
+        # 动态标签按钮字典 {tag_text: PillPushButton}
+        self.tag_buttons = {}
         
         promptLayout.addWidget(promptTitle)
         promptLayout.addWidget(self.promptInput)
         
-        # 添加快捷标签按钮组 - 使用网格布局 (3x3)
-        tagsLayout = QGridLayout()
-        tagsLayout.setSpacing(8)
+        # 动态标签容器（使用滚动区域）
+        self.tagsScrollArea = QScrollArea()
+        self.tagsScrollArea.setWidgetResizable(True)
+        self.tagsScrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.tagsScrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.tagsScrollArea.setMaximumHeight(180)
+        self.tagsScrollArea.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
-        # 基础音色标签
-        self.tagYoungFemale = PillPushButton("年轻女性，温柔甜美")
-        self.tagMatureMale = PillPushButton("成熟男性，沉稳有力") 
-        self.tagChildVoice = PillPushButton("儿童声音，活泼可爱")
+        # 标签内容容器
+        self.tagsContentWidget = QWidget()
+        self.tagsContentLayout = QVBoxLayout(self.tagsContentWidget)
+        self.tagsContentLayout.setContentsMargins(0, 0, 0, 0)
+        self.tagsContentLayout.setSpacing(12)
         
-        # 情感风格标签
-        self.tagCheerful = PillPushButton("更欢快、语速稍快")
-        self.tagSerious = PillPushButton("严肃认真，语速适中")
-        self.tagGentle = PillPushButton("温柔舒缓，轻声细语")
+        self.tagsScrollArea.setWidget(self.tagsContentWidget)
+        promptLayout.addWidget(self.tagsScrollArea)
         
-        # 方言特色标签
-        self.tagNortheast = PillPushButton("东北话")
-        self.tagSichuan = PillPushButton("四川话")
-        
-        # 连接按钮点击事件 - 添加/移除文本模式
-        self.tagYoungFemale.clicked.connect(lambda: self.__toggle_prompt_text("年轻女性，温柔甜美"))
-        self.tagMatureMale.clicked.connect(lambda: self.__toggle_prompt_text("成熟男性，沉稳有力"))
-        self.tagChildVoice.clicked.connect(lambda: self.__toggle_prompt_text("儿童声音，活泼可爱"))
-        self.tagCheerful.clicked.connect(lambda: self.__toggle_prompt_text("更欢快、语速稍快"))
-        self.tagSerious.clicked.connect(lambda: self.__toggle_prompt_text("严肃认真，语速适中"))
-        self.tagGentle.clicked.connect(lambda: self.__toggle_prompt_text("温柔舒缓，轻声细语"))
-        self.tagNortheast.clicked.connect(lambda: self.__toggle_prompt_text("东北话"))
-        self.tagSichuan.clicked.connect(lambda: self.__toggle_prompt_text("四川话"))
-        
-        # 添加标签到网格布局 (3列布局)
-        tagsLayout.addWidget(self.tagYoungFemale, 0, 0)
-        tagsLayout.addWidget(self.tagMatureMale, 0, 1)
-        tagsLayout.addWidget(self.tagChildVoice, 0, 2)
-        tagsLayout.addWidget(self.tagCheerful, 1, 0)
-        tagsLayout.addWidget(self.tagSerious, 1, 1)
-        tagsLayout.addWidget(self.tagGentle, 1, 2)
-        tagsLayout.addWidget(self.tagNortheast, 2, 0)
-        tagsLayout.addWidget(self.tagSichuan, 2, 1)
-        # 第2行第2列留空以保持平衡
-        
-        promptLayout.addLayout(tagsLayout)
+        # 初始化时加载标签
+        self.__load_dynamic_tags()
 
         # 3. 音色管理卡
         voiceCard = CardWidget()
@@ -1011,6 +995,94 @@ class SynthesisInterface(ScrollArea):
             new_text = ''
         
         self.promptInput.setPlainText(new_text)
+    
+    def __load_dynamic_tags(self):
+        """从标签管理系统动态加载标签"""
+        try:
+            from app.view.tag_manager_interface import TagManagerInterface
+            from pathlib import Path
+            
+            # 获取标签配置
+            base_dir = Path(__file__).resolve().parent.parent.parent.parent
+            config_file = base_dir / "config" / "tags_config.json"
+            
+            if not config_file.exists():
+                # 如果配置文件不存在，显示提示
+                self.__show_empty_tags_hint()
+                return
+            
+            import json
+            with open(config_file, 'r', encoding='utf-8') as f:
+                tags_config = json.load(f)
+            
+            # 清空现有标签
+            self.__clear_tag_buttons()
+            
+            if not tags_config:
+                self.__show_empty_tags_hint()
+                return
+            
+            # 按分类组织标签
+            for category_name, category_data in tags_config.items():
+                if not category_data.get('tags'):
+                    continue
+                
+                # 创建分类标题
+                category_label = StrongBodyLabel(category_name)
+                category_label.setStyleSheet("margin-top: 4px;")
+                self.tagsContentLayout.addWidget(category_label)
+                
+                # 创建该分类下的标签按钮容器（横向布局）
+                tags_row_layout = QHBoxLayout()
+                tags_row_layout.setSpacing(8)
+                tags_row_layout.setContentsMargins(0, 0, 0, 0)
+                
+                # 添加该分类的所有标签
+                for tag_data in category_data['tags']:
+                    tag_text = tag_data['text']
+                    tag_btn = PillPushButton(tag_text)
+                    tag_btn.clicked.connect(lambda checked, t=tag_text: self.__toggle_prompt_text(t))
+                    
+                    self.tag_buttons[tag_text] = tag_btn
+                    tags_row_layout.addWidget(tag_btn)
+                
+                tags_row_layout.addStretch()
+                self.tagsContentLayout.addLayout(tags_row_layout)
+            
+            self.tagsContentLayout.addStretch()
+            
+        except Exception as e:
+            print(f"[标签加载错误] {str(e)}")
+            self.__show_empty_tags_hint()
+    
+    def __clear_tag_buttons(self):
+        """清空所有动态标签按钮"""
+        # 清除布局中的所有widget
+        while self.tagsContentLayout.count():
+            item = self.tagsContentLayout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+            elif item.layout():
+                # 递归清除子布局
+                while item.layout().count():
+                    sub_item = item.layout().takeAt(0)
+                    sub_widget = sub_item.widget()
+                    if sub_widget:
+                        sub_widget.deleteLater()
+        
+        self.tag_buttons.clear()
+    
+    def __show_empty_tags_hint(self):
+        """显示空标签提示"""
+        # 不显示任何提示，保持空白
+        pass
+    
+    def __on_tag_toggled_from_manager(self, tag_text):
+        """响应来自标签管理界面的标签切换信号"""
+        # 当用户在标签管理界面点击标签时，自动添加到合成界面
+        if tag_text and tag_text not in self.selected_tags:
+            self.__toggle_prompt_text(tag_text)
 
     def __toggle_server(self):
         if self.serverProcess.state() == QProcess.NotRunning:

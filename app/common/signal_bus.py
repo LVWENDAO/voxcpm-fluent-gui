@@ -9,6 +9,7 @@ class SignalBus(QObject):
     voiceRegistered = pyqtSignal()  # 音色注册完成信号
     voiceDeleted = pyqtSignal()     # 音色删除完成信号
     historyGenerated = pyqtSignal() # 新历史记录生成信号
+    tagToggled = pyqtSignal(str)    # 标签切换信号
     
     # 全局音频控制信号
     audioPlayRequested = pyqtSignal(object)  # 播放请求信号，传递播放器实例

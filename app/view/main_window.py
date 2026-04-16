@@ -14,6 +14,7 @@ from app.common.style_sheet import StyleSheet
 from app.view.synthesis_interface import SynthesisInterface  
 from app.view.history_interface import HistoryInterface
 from app.view.voice_library_interface import VoiceLibraryInterface
+from app.view.tag_manager_interface import TagManagerInterface
 from app.view.setting_interface import SettingInterface
 
 # 导入资源文件（确保资源被加载）
@@ -33,6 +34,7 @@ class MainWindow(FluentWindow):
         self.synthesisInterface = SynthesisInterface(self)
         self.historyInterface = HistoryInterface(self)
         self.voiceLibraryInterface = VoiceLibraryInterface(self)
+        self.tagManagerInterface = TagManagerInterface(self)
         self.settingInterface = SettingInterface(self)
 
         # enable acrylic effect
@@ -49,12 +51,16 @@ class MainWindow(FluentWindow):
 
     def connectSignalToSlot(self):
         signalBus.micaEnableChanged.connect(self.setMicaEffectEnabled)
+        
+        # 连接标签管理更新信号到合成界面
+        self.tagManagerInterface.tagsUpdated.connect(self.synthesisInterface._SynthesisInterface__load_dynamic_tags)
 
     def initNavigation(self):
         # add navigation items
         self.addSubInterface(self.synthesisInterface, FIF.MUSIC, "语音合成")
         self.addSubInterface(self.historyInterface, FIF.HISTORY, "生成历史")
         self.addSubInterface(self.voiceLibraryInterface, FIF.ALBUM, "音色库")
+        self.addSubInterface(self.tagManagerInterface, FIF.TAG, "标签管理")
         
         self.addSubInterface(
             self.settingInterface, FIF.SETTING, "设置", NavigationItemPosition.BOTTOM)
