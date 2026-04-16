@@ -1,11 +1,11 @@
 # coding:utf-8
-from PyQt5.QtCore import Qt, QUrl, QObject, QEvent, QProcess, QTimer, QFileSystemWatcher
+from PyQt5.QtCore import Qt, QUrl, QObject, QEvent, QProcess, QTimer, QFileSystemWatcher, QRect, QSize, QPoint
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 import json
 import os
 from pathlib import Path
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, 
-                             QLabel, QSizePolicy, QToolTip, QGridLayout, QScrollArea)
+                             QLabel, QSizePolicy, QToolTip, QGridLayout, QScrollArea, QLayout, QLayoutItem)
 from PyQt5.QtGui import QDesktopServices
 from qfluentwidgets import (ScrollArea, CardWidget, TitleLabel, CaptionLabel, 
                             TextEdit, PlainTextEdit, Slider, SwitchButton, PrimaryPushButton, PushButton,
@@ -15,6 +15,89 @@ from qfluentwidgets import (ScrollArea, CardWidget, TitleLabel, CaptionLabel,
 from qfluentwidgets.multimedia import StandardMediaPlayBar
 
 from app.common.style_sheet import StyleSheet
+
+
+class FlowLayout(QLayout):
+    """标准流式布局实现"""
+    def __init__(self, parent=None, margin=0, h_spacing=5, v_spacing=5):
+        super().__init__(parent)
+        self._item_list = []
+        self.setContentsMargins(margin, margin, margin, margin)
+        self._h_spacing = h_spacing
+        self._v_spacing = v_spacing
+
+    def __del__(self):
+        item = self.takeAt(0)
+        while item:
+            item = self.takeAt(0)
+
+    def addItem(self, item):
+        self._item_list.append(item)
+
+    def count(self):
+        return len(self._item_list)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._item_list):
+            return self._item_list[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._item_list):
+            return self._item_list.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientations(Qt.Orientation(0))
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        height = self._doLayout(QRect(0, 0, width, 0), True)
+        return height
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._doLayout(rect, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._item_list:
+            size = size.expandedTo(item.minimumSize())
+        margin = self.contentsMargins()
+        size += QSize(margin.left() + margin.right(), margin.top() + margin.bottom())
+        return size
+
+    def _doLayout(self, rect, testOnly):
+        x = rect.x()
+        y = rect.y()
+        line_height = 0
+        spacing = self.spacing()
+
+        for item in self._item_list:
+            style = item.widget().style() if item.widget() else None
+            layout_spacing_x = style.layoutSpacing(QSizePolicy.PushButton, QSizePolicy.PushButton, Qt.Horizontal) if style else spacing
+            layout_spacing_y = style.layoutSpacing(QSizePolicy.PushButton, QSizePolicy.PushButton, Qt.Vertical) if style else spacing
+            space_x = self._h_spacing + layout_spacing_x
+            space_y = self._v_spacing + layout_spacing_y
+            next_x = x + item.sizeHint().width() + space_x
+            if next_x - space_x > rect.right() and line_height > 0:
+                x = rect.x()
+                y = y + line_height + space_y
+                next_x = x + item.sizeHint().width() + space_x
+                line_height = 0
+
+            if not testOnly:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+
+            x = next_x
+            line_height = max(line_height, item.sizeHint().height())
+
+        return y + line_height - rect.y()
 
 
 
@@ -316,15 +399,25 @@ class SynthesisInterface(ScrollArea):
         self.selected_tags = set()
         # 动态标签按钮字典 {tag_text: PillPushButton}
         self.tag_buttons = {}
+        # 分类导航按钮字典 {category_name: PillPushButton}
+        self._category_buttons = {}
+        self.current_category = None
         
         promptLayout.addWidget(promptTitle)
         promptLayout.addWidget(self.promptInput)
         
-        # 分类导航栏
-        from qfluentwidgets import SegmentedWidget
-        self.tagCategoryBar = SegmentedWidget()
-        self.tagCategoryBar.setFixedHeight(40)
-        promptLayout.addWidget(self.tagCategoryBar)
+        # 分类导航栏（使用流式布局支持自动换行）
+        self.categoryNavWidget = QWidget()
+        self.categoryNavLayout = FlowLayout(self.categoryNavWidget, margin=0, h_spacing=6, v_spacing=4)
+        # 添加底部分隔线
+        self.categoryNavWidget.setStyleSheet("""
+            QWidget {
+                background-color: transparent;
+                border-bottom: 1px solid palette(mid);
+                padding-bottom: 8px;
+            }
+        """)
+        promptLayout.addWidget(self.categoryNavWidget)
         
         # 动态标签容器（使用滚动区域）
         self.tagsScrollArea = QScrollArea()
@@ -334,11 +427,9 @@ class SynthesisInterface(ScrollArea):
         self.tagsScrollArea.setMaximumHeight(180)
         self.tagsScrollArea.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
-        # 标签内容容器
+        # 标签内容容器（使用流式布局）
         self.tagsContentWidget = QWidget()
-        self.tagsContentLayout = QVBoxLayout(self.tagsContentWidget)
-        self.tagsContentLayout.setContentsMargins(0, 0, 0, 0)
-        self.tagsContentLayout.setSpacing(12)
+        self.tagsContentLayout = FlowLayout(self.tagsContentWidget, margin=0, h_spacing=8, v_spacing=8)
         
         self.tagsScrollArea.setWidget(self.tagsContentWidget)
         promptLayout.addWidget(self.tagsScrollArea)
@@ -1026,7 +1117,7 @@ class SynthesisInterface(ScrollArea):
             
             # 清空现有标签和分类导航
             self.__clear_tag_buttons()
-            self.tagCategoryBar.clear()
+            self.__clear_category_nav()
             
             if not tags_config:
                 self.__show_empty_tags_hint()
@@ -1035,23 +1126,21 @@ class SynthesisInterface(ScrollArea):
             # 保存配置供后续使用
             self._tags_config = tags_config
             
-            # 添加分类到导航栏
+            # 用PillPushButton构建可换行的分类导航
             first_category = None
+            self._category_buttons = {}  # {category_name: PillPushButton}
             for category_name in tags_config.keys():
                 if first_category is None:
                     first_category = category_name
-                self.tagCategoryBar.addItem(
-                    routeKey=category_name,
-                    text=category_name,
-                    onClick=lambda: None
-                )
-            
-            # 连接信号
-            self.tagCategoryBar.currentItemChanged.connect(self.__on_tag_category_changed)
+                cat_btn = PillPushButton(category_name)
+                cat_btn.setCheckable(True)
+                cat_btn.clicked.connect(lambda checked, name=category_name: self.__on_category_nav_clicked(name))
+                self._category_buttons[category_name] = cat_btn
+                self.categoryNavLayout.addWidget(cat_btn)
             
             # 默认选中第一个分类并加载标签
             if first_category:
-                self.tagCategoryBar.setCurrentItem(first_category)
+                self._category_buttons[first_category].setChecked(True)
                 self.__refresh_tags_by_category(first_category)
             
         except Exception as e:
@@ -1059,12 +1148,29 @@ class SynthesisInterface(ScrollArea):
             traceback.print_exc()
             self.__show_empty_tags_hint()
     
+    def __on_category_nav_clicked(self, category_name):
+        """点击分类导航"""
+        # 切换选中状态
+        for name, btn in self._category_buttons.items():
+            btn.setChecked(name == category_name)
+        self.current_category = category_name
+        self.__refresh_tags_by_category(category_name)
+    
+    def __clear_category_nav(self):
+        """清空分类导航按钮"""
+        while self.categoryNavLayout.count():
+            item = self.categoryNavLayout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        self._category_buttons.clear()
+    
     def __on_tag_category_changed(self, route_key):
         """切换标签分类"""
         self.__refresh_tags_by_category(route_key)
     
     def __refresh_tags_by_category(self, category_name):
-        """根据分类刷新标签显示"""
+        """根据分类刷新标签显示（流式布局自动换行）"""
         # 清空当前标签
         self.__clear_tag_buttons()
         
@@ -1079,45 +1185,23 @@ class SynthesisInterface(ScrollArea):
             hint_label.setStyleSheet("padding: 20px;")
             hint_label.setAlignment(Qt.AlignCenter)
             self.tagsContentLayout.addWidget(hint_label)
-            self.tagsContentLayout.addStretch()
             return
         
-        
-        # 创建标签按钮容器（横向布局）
-        tags_row_layout = QHBoxLayout()
-        tags_row_layout.setSpacing(8)
-        tags_row_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 添加该分类的所有标签
+        # 流式布局直接添加按钮，自动换行
         for tag_data in tags:
             tag_text = tag_data['text']
             tag_btn = PillPushButton(tag_text)
             tag_btn.clicked.connect(lambda checked, t=tag_text: self.__toggle_prompt_text(t))
             
             self.tag_buttons[tag_text] = tag_btn
-            tags_row_layout.addWidget(tag_btn)
-        
-        tags_row_layout.addStretch()
-        self.tagsContentLayout.addLayout(tags_row_layout)
-        self.tagsContentLayout.addStretch()
+            self.tagsContentLayout.addWidget(tag_btn)
     
     def __clear_tag_buttons(self):
         """清空所有动态标签按钮"""
-        # 完全重置布局
         while self.tagsContentLayout.count():
             item = self.tagsContentLayout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-            elif item.layout():
-                # 递归清除子布局
-                sub_layout = item.layout()
-                while sub_layout.count():
-                    sub_item = sub_layout.takeAt(0)
-                    sub_widget = sub_item.widget()
-                    if sub_widget:
-                        sub_widget.deleteLater()
-        
+            if item.widget():
+                item.widget().deleteLater()
         self.tag_buttons.clear()
     
     def __show_empty_tags_hint(self):
