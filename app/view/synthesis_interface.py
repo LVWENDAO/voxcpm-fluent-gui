@@ -715,15 +715,22 @@ class SynthesisInterface(ScrollArea):
                     
                     # 添加另存为按钮
                     save_as_btn = PushButton("另存为")
-                    def on_save_as():
+                    
+                    # 获取目标文本作为默认文件名
+                    target_text = self.textInput.toPlainText().strip() if self.textInput.toPlainText() else ""
+                    for char in ['\\', '/', ':', '*', '?', '"', '<', '>', '|']:
+                        target_text = target_text.replace(char, '')
+                    default_name = (target_text[:50] if target_text else "audio") + ".wav"
+                    
+                    def on_save_as(path=audio_path, dname=default_name):
                         save_path, _ = QFileDialog.getSaveFileName(
-                            self, "另存为", 
-                            os.path.basename(audio_path), 
+                            self.window(), "另存为", 
+                            dname, 
                             "Audio Files (*.wav *.mp3 *.flac)"
                         )
                         if save_path:
                             import shutil
-                            shutil.copy2(audio_path, save_path)
+                            shutil.copy2(path, save_path)
                             InfoBar.success(title='成功', content="文件已保存", parent=self, duration=2000)
                     save_as_btn.clicked.connect(on_save_as)
                     info_bar.addWidget(save_as_btn)

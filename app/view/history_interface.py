@@ -323,20 +323,46 @@ class HistoryInterface(QWidget):
         
         # 另存为
         saveAsAction = Action(FIF.SAVE_AS, "另存为")
-        def on_save_as():
-            folder = self.history_dir / history_id
-            audio_file = folder / f"{history_id}.wav"
+        
+        # 获取目标文本作为默认文件名
+        folder = self.history_dir / history_id
+        audio_file = folder / "audio.wav"
+        default_name = f"{history_id}.wav"
+        
+        if audio_file.exists():
+            meta_file = folder / "meta.json"
+            if meta_file.exists():
+                try:
+                    with open(meta_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    text = data.get("text", "audio").strip()
+                    # 清理文件名中的非法字符
+                    for char in ['\\', '/', ':', '*', '?', '"', '<', '>', '|']:
+                        text = text.replace(char, '')
+                    if text:
+                        default_name = text[:50] + ".wav"
+                except:
+                    pass
+        
+        def on_save_as(dname=default_name):
+            # 重新获取最新数据，避免闭包变量过期
+            fid = history_id
+            folder = self.history_dir / fid
+            audio_file = folder / "audio.wav"
             if not audio_file.exists():
+                InfoBar.warning(title='提示', content="音频文件不存在", parent=self)
                 return
+            
             save_path, _ = QFileDialog.getSaveFileName(
-                self, "另存为", 
-                f"{history_id}.wav", 
+                self.window(), "另存为", 
+                dname, 
                 "Audio Files (*.wav *.mp3 *.flac)"
             )
             if save_path:
                 shutil.copy2(str(audio_file), save_path)
                 InfoBar.success(title='成功', content="文件已保存", parent=self, duration=2000)
-        saveAsAction.triggered.connect(on_save_as)
+        
+        saveAsAction.triggered.connect(lambda: on_save_as())
         menu.addAction(saveAsAction)
         
         # 注册
