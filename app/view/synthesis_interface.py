@@ -320,6 +320,12 @@ class SynthesisInterface(ScrollArea):
         promptLayout.addWidget(promptTitle)
         promptLayout.addWidget(self.promptInput)
         
+        # 分类导航栏
+        from qfluentwidgets import SegmentedWidget
+        self.tagCategoryBar = SegmentedWidget()
+        self.tagCategoryBar.setFixedHeight(40)
+        promptLayout.addWidget(self.tagCategoryBar)
+        
         # 动态标签容器（使用滚动区域）
         self.tagsScrollArea = QScrollArea()
         self.tagsScrollArea.setWidgetResizable(True)
@@ -1004,65 +1010,100 @@ class SynthesisInterface(ScrollArea):
     def __load_dynamic_tags(self):
         """从标签管理系统动态加载标签"""
         try:
-            from app.view.tag_manager_interface import TagManagerInterface
             from pathlib import Path
+            import json
             
             # 获取标签配置
             base_dir = Path(__file__).resolve().parent.parent.parent.parent
             config_file = base_dir / "config" / "tags_config.json"
             
             if not config_file.exists():
-                # 如果配置文件不存在，显示提示
                 self.__show_empty_tags_hint()
                 return
             
-            import json
             with open(config_file, 'r', encoding='utf-8') as f:
                 tags_config = json.load(f)
             
-            # 清空现有标签
+            # 清空现有标签和分类导航
             self.__clear_tag_buttons()
+            self.tagCategoryBar.clear()
             
             if not tags_config:
                 self.__show_empty_tags_hint()
                 return
             
-            # 按分类组织标签
-            for category_name, category_data in tags_config.items():
-                if not category_data.get('tags'):
-                    continue
-                
-                # 创建分类标题
-                category_label = StrongBodyLabel(category_name)
-                category_label.setStyleSheet("margin-top: 4px;")
-                self.tagsContentLayout.addWidget(category_label)
-                
-                # 创建该分类下的标签按钮容器（横向布局）
-                tags_row_layout = QHBoxLayout()
-                tags_row_layout.setSpacing(8)
-                tags_row_layout.setContentsMargins(0, 0, 0, 0)
-                
-                # 添加该分类的所有标签
-                for tag_data in category_data['tags']:
-                    tag_text = tag_data['text']
-                    tag_btn = PillPushButton(tag_text)
-                    tag_btn.clicked.connect(lambda checked, t=tag_text: self.__toggle_prompt_text(t))
-                    
-                    self.tag_buttons[tag_text] = tag_btn
-                    tags_row_layout.addWidget(tag_btn)
-                
-                tags_row_layout.addStretch()
-                self.tagsContentLayout.addLayout(tags_row_layout)
+            # 保存配置供后续使用
+            self._tags_config = tags_config
             
-            self.tagsContentLayout.addStretch()
+            # 添加分类到导航栏
+            first_category = None
+            for category_name in tags_config.keys():
+                if first_category is None:
+                    first_category = category_name
+                self.tagCategoryBar.addItem(
+                    routeKey=category_name,
+                    text=category_name,
+                    onClick=lambda: None
+                )
+            
+            # 连接信号
+            self.tagCategoryBar.currentItemChanged.connect(self.__on_tag_category_changed)
+            
+            # 默认选中第一个分类并加载标签
+            if first_category:
+                self.tagCategoryBar.setCurrentItem(first_category)
+                self.__refresh_tags_by_category(first_category)
             
         except Exception as e:
-            print(f"[标签加载错误] {str(e)}")
+            import traceback
+            traceback.print_exc()
             self.__show_empty_tags_hint()
+    
+    def __on_tag_category_changed(self, route_key):
+        """切换标签分类"""
+        self.__refresh_tags_by_category(route_key)
+    
+    def __refresh_tags_by_category(self, category_name):
+        """根据分类刷新标签显示"""
+        # 清空当前标签
+        self.__clear_tag_buttons()
+        
+        if not hasattr(self, '_tags_config'):
+            return
+        
+        category_data = self._tags_config.get(category_name, {})
+        tags = category_data.get('tags', [])
+        
+        if not tags:
+            hint_label = CaptionLabel('该分类下暂无标签')
+            hint_label.setStyleSheet("padding: 20px;")
+            hint_label.setAlignment(Qt.AlignCenter)
+            self.tagsContentLayout.addWidget(hint_label)
+            self.tagsContentLayout.addStretch()
+            return
+        
+        
+        # 创建标签按钮容器（横向布局）
+        tags_row_layout = QHBoxLayout()
+        tags_row_layout.setSpacing(8)
+        tags_row_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 添加该分类的所有标签
+        for tag_data in tags:
+            tag_text = tag_data['text']
+            tag_btn = PillPushButton(tag_text)
+            tag_btn.clicked.connect(lambda checked, t=tag_text: self.__toggle_prompt_text(t))
+            
+            self.tag_buttons[tag_text] = tag_btn
+            tags_row_layout.addWidget(tag_btn)
+        
+        tags_row_layout.addStretch()
+        self.tagsContentLayout.addLayout(tags_row_layout)
+        self.tagsContentLayout.addStretch()
     
     def __clear_tag_buttons(self):
         """清空所有动态标签按钮"""
-        # 清除布局中的所有widget
+        # 完全重置布局
         while self.tagsContentLayout.count():
             item = self.tagsContentLayout.takeAt(0)
             widget = item.widget()
@@ -1070,8 +1111,9 @@ class SynthesisInterface(ScrollArea):
                 widget.deleteLater()
             elif item.layout():
                 # 递归清除子布局
-                while item.layout().count():
-                    sub_item = item.layout().takeAt(0)
+                sub_layout = item.layout()
+                while sub_layout.count():
+                    sub_item = sub_layout.takeAt(0)
                     sub_widget = sub_item.widget()
                     if sub_widget:
                         sub_widget.deleteLater()
