@@ -12,7 +12,8 @@ from qfluentwidgets import (
     ScrollArea, FlowLayout, PillPushButton, LineEdit, PushButton,
     PrimaryPushButton, ComboBox, StrongBodyLabel, BodyLabel, CaptionLabel,
     InfoBar, FluentIcon as FIF, RoundMenu, Action, TransparentToolButton,
-    MessageBoxBase, SubtitleLabel, SearchLineEdit, isDarkTheme, setTheme, SegmentedWidget, TabBar, TabCloseButtonDisplayMode, ToolButton
+    MessageBoxBase, SubtitleLabel, SearchLineEdit, isDarkTheme, setTheme, SegmentedWidget, TabBar, TabCloseButtonDisplayMode, ToolButton,
+    SimpleCardWidget
 )
 
 
@@ -454,8 +455,8 @@ class TagManagerInterface(QWidget):
             
             total_tags += len(tags)
             
-            # 创建分类容器（透明背景，使用分隔线区分）
-            category_card = QWidget(self)
+            # 创建分类容器（使用 SimpleCardWidget 实现主题适配）
+            category_card = SimpleCardWidget(self)
             category_card.setObjectName("categoryCard")
             category_layout = QVBoxLayout(category_card)
             category_layout.setContentsMargins(16, 12, 16, 12)
