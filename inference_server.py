@@ -213,9 +213,62 @@ def generate_speech(request: SynthesisRequest):
             
             logger.info(f"[Cache Loaded] Mode: {cache_mode}")
             logger.info(f"[Cache Loaded] Has audio_feat: {has_audio_feat}, Shape: {audio_shape}")
+        elif request.reference_wav_path:
+            # 没有 voice_id 但有参考音频 -> 手动构建缓存（绕过 librosa）
+            logger.info(f"[Inference] Building prompt cache from reference audio: {request.reference_wav_path}")
+            ref_path = Path(request.reference_wav_path)
+            if not ref_path.exists():
+                raise HTTPException(status_code=400, detail=f"Reference audio file not found: {request.reference_wav_path}")
+            
+            try:
+                # 1. 使用 soundfile 加载音频（替代 librosa）
+                audio_data, sample_rate = sf.read(str(ref_path.resolve()))
+                if len(audio_data.shape) > 1:
+                    audio_data = audio_data.mean(axis=1)  # 转单声道
+                
+                # 2. 转换为 torch tensor
+                audio_tensor = torch.from_numpy(audio_data).float().unsqueeze(0)
+                logger.info(f"[Audio] Loaded with soundfile: shape={audio_tensor.shape}, sr={sample_rate}")
+                
+                # 3. 重采样到模型需要的采样率
+                target_sr = tts_model.tts_model._encode_sample_rate
+                if sample_rate != target_sr:
+                    import torchaudio.transforms as T
+                    resampler = T.Resample(sample_rate, target_sr)
+                    audio_tensor = resampler(audio_tensor)
+                    logger.info(f"[Audio] Resampled from {sample_rate} to {target_sr}")
+                
+                # 4. 填充对齐（padding_mode="right"）
+                patch_size = tts_model.tts_model.patch_size
+                chunk_size = tts_model.tts_model.chunk_size
+                patch_len = patch_size * chunk_size
+                
+                if audio_tensor.size(1) % patch_len != 0:
+                    padding_size = patch_len - audio_tensor.size(1) % patch_len
+                    audio_tensor = torch.nn.functional.pad(audio_tensor, (0, padding_size))
+                    logger.info(f"[Audio] Padded {padding_size} samples (right)")
+                
+                # 5. VAE 编码
+                with torch.inference_mode():
+                    audio_tensor = audio_tensor.to(tts_model.tts_model.device)
+                    feat = tts_model.tts_model.audio_vae.encode(audio_tensor, target_sr).cpu()
+                    
+                    # reshape 为 (T, P, D)
+                    latent_dim = tts_model.tts_model.audio_vae.latent_dim
+                    audio_feat = feat.view(latent_dim, -1, patch_size).permute(1, 2, 0)
+                
+                # 6. 构建缓存
+                prompt_cache = {
+                    "ref_audio_feat": audio_feat,
+                    "mode": "reference"
+                }
+                logger.info(f"[Cache Built] Mode: reference, audio_feat shape: {audio_feat.shape}")
+                
+            except Exception as e:
+                logger.error(f"[Audio] Failed to build cache: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to process reference audio: {str(e)}")
         else:
-            logger.info("[Inference] No voice_id provided, using reference audio directly.")
-            # 不构建缓存，直接使用参考音频路径
+            logger.info("[Inference] Pure TTS mode, no voice cache")
 
 
         # 2. 设置随机种子
