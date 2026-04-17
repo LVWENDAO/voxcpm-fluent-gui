@@ -1165,9 +1165,32 @@ class SynthesisInterface(ScrollArea):
         self.__update_tag_buttons_state()
     
     def __update_tag_buttons_state(self):
-        """更新当前可见标签按钮的选中状态"""
+        """更新当前可见标签按钮的选中状态，并同步分类标题状态"""
         for tag_text, btn in self.tag_buttons.items():
             btn.setChecked(tag_text in self.selected_tags)
+        
+        # 更新分类按钮文字（添加/移除状态点）
+        self.__update_category_button_texts()
+    
+    def __update_category_button_texts(self):
+        """根据选中标签情况，更新分类按钮的圆点颜色"""
+        if not hasattr(self, '_tags_config'):
+            return
+            
+        for category_name, btn in self._category_buttons.items():
+            category_data = self._tags_config.get(category_name, {})
+            tags = [t['text'] for t in category_data.get('tags', [])]
+            
+            # 检查该分类下是否有标签被选中
+            has_selected = any(tag in self.selected_tags for tag in tags)
+            
+            # 核心逻辑：利用全角空格保持宽度恒定
+            if has_selected:
+                # 选中时：显示圆点
+                btn.setText(f"{category_name} ●")
+            else:
+                # 未选中时：显示全角空格（宽度相同但不可见）
+                btn.setText(f"{category_name}\u3000")
     
     def __load_dynamic_tags(self):
         """从标签管理系统动态加载标签"""
@@ -1203,8 +1226,8 @@ class SynthesisInterface(ScrollArea):
             for category_name in tags_config.keys():
                 if first_category is None:
                     first_category = category_name
-                cat_btn = PillPushButton(category_name)
-                cat_btn.setCheckable(True)
+                # 使用全角空格占位（宽度与圆点一致），确保按钮宽度恒定
+                cat_btn = PillPushButton(f"{category_name}\u3000")
                 cat_btn.clicked.connect(lambda checked, name=category_name: self.__on_category_nav_clicked(name))
                 self._category_buttons[category_name] = cat_btn
                 self.categoryNavLayout.addWidget(cat_btn)
@@ -1213,6 +1236,7 @@ class SynthesisInterface(ScrollArea):
             if first_category:
                 self._category_buttons[first_category].setChecked(True)
                 self.__refresh_tags_by_category(first_category)
+                self.__update_category_button_texts()
             
         except Exception as e:
             import traceback
@@ -1226,6 +1250,8 @@ class SynthesisInterface(ScrollArea):
             btn.setChecked(name == category_name)
         self.current_category = category_name
         self.__refresh_tags_by_category(category_name)
+        # 刷新所有分类按钮的文字状态
+        self.__update_category_button_texts()
     
     def __clear_category_nav(self):
         """清空分类导航按钮"""
@@ -1262,7 +1288,12 @@ class SynthesisInterface(ScrollArea):
         for tag_data in tags:
             tag_text = tag_data['text']
             tag_btn = PillPushButton(tag_text)
+            tag_btn.setCheckable(True)  # 启用可选中状态
             tag_btn.clicked.connect(lambda checked, t=tag_text: self.__toggle_prompt_text(t))
+            
+            # 恢复之前的选中状态
+            if tag_text in self.selected_tags:
+                tag_btn.setChecked(True)
             
             self.tag_buttons[tag_text] = tag_btn
             self.tagsContentLayout.addWidget(tag_btn)
