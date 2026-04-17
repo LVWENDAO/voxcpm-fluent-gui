@@ -460,6 +460,7 @@ class SynthesisInterface(ScrollArea):
         regLayout = QHBoxLayout()
         self.voiceNameInput = LineEdit()
         self.voiceNameInput.setPlaceholderText("输入音色名称")
+        self.voiceNameInput.setMinimumWidth(200)
         self.registerVoiceBtn = PushButton(FIF.SAVE, "注册")
         self.registerVoiceBtn.clicked.connect(self.__onRegisterVoice)
         regLayout.addWidget(self.voiceNameInput)

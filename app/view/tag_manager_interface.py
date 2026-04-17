@@ -9,11 +9,115 @@ import json
 from pathlib import Path
 
 from qfluentwidgets import (
-    ScrollArea, FlowLayout, PillPushButton, LineEdit, PushButton, 
+    ScrollArea, FlowLayout, PillPushButton, LineEdit, PushButton,
     PrimaryPushButton, ComboBox, StrongBodyLabel, BodyLabel, CaptionLabel,
     InfoBar, FluentIcon as FIF, RoundMenu, Action, TransparentToolButton,
-    Dialog, SearchLineEdit, isDarkTheme, setTheme, SegmentedWidget, TabBar, TabCloseButtonDisplayMode, ToolButton
+    MessageBoxBase, SubtitleLabel, SearchLineEdit, isDarkTheme, setTheme, SegmentedWidget, TabBar, TabCloseButtonDisplayMode, ToolButton
 )
+
+
+class InputDialog(MessageBoxBase):
+    """通用输入对话框"""
+    def __init__(self, title, placeholder="", parent=None):
+        super().__init__(parent)
+        self.titleLabel = SubtitleLabel(title, self)
+        self.inputLineEdit = LineEdit(self)
+        self.inputLineEdit.setPlaceholderText(placeholder)
+        
+        # 调整布局边距，避免标题被裁剪
+        self.viewLayout.setContentsMargins(24, 16, 24, 24)
+        self.viewLayout.setSpacing(12)
+        
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addWidget(self.inputLineEdit)
+        
+        self.yesButton.setText('确定')
+        self.cancelButton.setText('取消')
+        
+        self.widget.setMinimumWidth(350)
+        
+        self.inputLineEdit.setFocus()
+    
+    @property
+    def text(self):
+        return self.inputLineEdit.text().strip()
+
+
+class AddTagDialog(MessageBoxBase):
+    """添加标签对话框（含分类选择）"""
+    def __init__(self, categories, parent=None):
+        super().__init__(parent)
+        self.titleLabel = SubtitleLabel('添加新标签', self)
+        
+        # 调整布局边距，避免标题被裁剪
+        self.viewLayout.setContentsMargins(24, 16, 24, 24)
+        self.viewLayout.setSpacing(12)
+        
+        # 分类选择
+        catLayout = QHBoxLayout()
+        catLayout.addWidget(BodyLabel("选择分类:"))
+        self.catCombo = ComboBox()
+        self.catCombo.addItems(categories)
+        self.catCombo.setMinimumWidth(200)
+        catLayout.addWidget(self.catCombo)
+        catLayout.addStretch()
+        
+        # 标签文本输入
+        textLayout = QHBoxLayout()
+        textLayout.addWidget(BodyLabel("标签文本:"))
+        self.textInput = LineEdit()
+        self.textInput.setPlaceholderText("例如：年轻女声、欢快")
+        self.textInput.setMinimumWidth(250)
+        textLayout.addWidget(self.textInput)
+        textLayout.addStretch()
+        
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addLayout(catLayout)
+        self.viewLayout.addLayout(textLayout)
+        
+        self.yesButton.setText('添加')
+        self.cancelButton.setText('取消')
+        
+        self.textInput.setFocus()
+    
+    @property
+    def category(self):
+        return self.catCombo.currentText()
+    
+    @property
+    def text(self):
+        return self.textInput.text().strip()
+
+
+class EditTagDialog(MessageBoxBase):
+    """编辑标签对话框"""
+    def __init__(self, old_text, parent=None):
+        super().__init__(parent)
+        self.titleLabel = SubtitleLabel('编辑标签', self)
+        
+        # 调整布局边距，避免标题被裁剪
+        self.viewLayout.setContentsMargins(24, 16, 24, 24)
+        self.viewLayout.setSpacing(12)
+        
+        textLayout = QHBoxLayout()
+        textLayout.addWidget(BodyLabel("标签文本:"))
+        self.textInput = LineEdit()
+        self.textInput.setText(old_text)
+        self.textInput.setMinimumWidth(250)
+        textLayout.addWidget(self.textInput)
+        textLayout.addStretch()
+        
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addLayout(textLayout)
+        
+        self.yesButton.setText('确定')
+        self.cancelButton.setText('取消')
+        
+        self.textInput.setFocus()
+    
+    @property
+    def text(self):
+        return self.textInput.text().strip()
 
 
 class TagTabBar(QWidget):
@@ -434,16 +538,10 @@ class TagManagerInterface(QWidget):
     
     def __on_add_category(self):
         """添加分类"""
-        # 使用 Dialog 输入分类名称
-        dialog = Dialog("添加新分类", "请输入分类名称", self)
-        input_widget = LineEdit()
-        input_widget.setPlaceholderText("例如：音色类型、情感风格")
-        dialog.vBoxLayout.insertWidget(1, input_widget)
-        dialog.yesButton.setText("确定")
-        dialog.cancelButton.setText("取消")
+        dialog = InputDialog("添加新分类", "例如：音色类型、情感风格", self)
         
         if dialog.exec():
-            name = input_widget.text().strip()
+            name = dialog.text
             if not name:
                 InfoBar.warning(title='提示', content="分类名称不能为空", parent=self)
                 return
@@ -465,16 +563,11 @@ class TagManagerInterface(QWidget):
     
     def __on_category_edited(self, old_name, _):
         """编辑分类"""
-        dialog = Dialog("编辑分类", "请输入新的分类名称", self)
-        input_widget = LineEdit()
-        input_widget.setText(old_name)
-        input_widget.setPlaceholderText("例如：音色类型、情感风格")
-        dialog.vBoxLayout.insertWidget(1, input_widget)
-        dialog.yesButton.setText("确定")
-        dialog.cancelButton.setText("取消")
+        dialog = InputDialog("编辑分类", "例如：音色类型、情感风格", self)
+        dialog.inputLineEdit.setText(old_name)
         
         if dialog.exec():
-            new_name = input_widget.text().strip()
+            new_name = dialog.text
             if not new_name:
                 InfoBar.warning(title='提示', content="分类名称不能为空", parent=self)
                 return
@@ -497,11 +590,12 @@ class TagManagerInterface(QWidget):
     
     def __on_category_deleted(self, category_name):
         """删除分类"""
-        dialog = Dialog("确认删除", f"确定要删除分类「{category_name}」及其所有标签吗？", self)
-        dialog.yesButton.setText("删除")
-        dialog.cancelButton.setText("取消")
+        from qfluentwidgets import MessageBox
+        w = MessageBox("确认删除", f"确定要删除分类「{category_name}」及其所有标签吗？", self.window())
+        w.yesButton.setText("删除")
+        w.cancelButton.setText("取消")
         
-        if dialog.exec():
+        if w.exec():
             del self.tags_config[category_name]
             
             self.__save_config()
@@ -512,15 +606,10 @@ class TagManagerInterface(QWidget):
     
     def __on_add_tag_to_category(self, category):
         """向指定分类添加标签"""
-        dialog = Dialog("添加新标签", f"为分类「{category}」添加标签", self)
-        input_widget = LineEdit()
-        input_widget.setPlaceholderText("例如：年轻女声、欢快")
-        dialog.vBoxLayout.insertWidget(1, input_widget)
-        dialog.yesButton.setText("添加")
-        dialog.cancelButton.setText("取消")
+        dialog = InputDialog("添加新标签", "例如：年轻女声、欢快", self)
         
         if dialog.exec():
-            text = input_widget.text().strip()
+            text = dialog.text
             if not text:
                 InfoBar.warning(title='提示', content="标签文本不能为空", parent=self)
                 return
@@ -547,36 +636,11 @@ class TagManagerInterface(QWidget):
             InfoBar.warning(title='提示', content="请先添加一个分类", parent=self)
             return
         
-        # 让用户选择分类并输入标签
-        dialog = Dialog("添加新标签", "请选择分类并填写标签信息", self)
-        dialog.vBoxLayout.setSpacing(12)
-        
-        # 分类选择
-        catLayout = QHBoxLayout()
-        catLayout.addWidget(BodyLabel("选择分类:"))
-        catCombo = ComboBox()
-        catCombo.addItems(list(self.tags_config.keys()))
-        catCombo.setMinimumWidth(200)
-        catLayout.addWidget(catCombo)
-        catLayout.addStretch()
-        dialog.vBoxLayout.addLayout(catLayout)
-        
-        # 标签文本输入
-        textLayout = QHBoxLayout()
-        textLayout.addWidget(BodyLabel("标签文本:"))
-        textInput = LineEdit()
-        textInput.setPlaceholderText("例如：年轻女声、欢快")
-        textInput.setMinimumWidth(250)
-        textLayout.addWidget(textInput)
-        textLayout.addStretch()
-        dialog.vBoxLayout.addLayout(textLayout)
-        
-        dialog.yesButton.setText("添加")
-        dialog.cancelButton.setText("取消")
+        dialog = AddTagDialog(list(self.tags_config.keys()), self)
         
         if dialog.exec():
-            category = catCombo.currentText()
-            text = textInput.text().strip()
+            category = dialog.category
+            text = dialog.text
             if not text:
                 InfoBar.warning(title='提示', content="标签文本不能为空", parent=self)
                 return
@@ -609,23 +673,10 @@ class TagManagerInterface(QWidget):
         if not category:
             return
         
-        dialog = Dialog("编辑标签", "修改标签信息", self)
-        dialog.vBoxLayout.setSpacing(12)
-        
-        textLayout = QHBoxLayout()
-        textLayout.addWidget(BodyLabel("标签文本:"))
-        textInput = LineEdit()
-        textInput.setText(old_text)
-        textInput.setMinimumWidth(250)
-        textLayout.addWidget(textInput)
-        textLayout.addStretch()
-        dialog.vBoxLayout.addLayout(textLayout)
-        
-        dialog.yesButton.setText("确定")
-        dialog.cancelButton.setText("取消")
+        dialog = EditTagDialog(old_text, self)
         
         if dialog.exec():
-            new_text = textInput.text().strip()
+            new_text = dialog.text
             if not new_text:
                 InfoBar.warning(title='提示', content="标签文本不能为空", parent=self)
                 return

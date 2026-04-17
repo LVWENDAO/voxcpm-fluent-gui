@@ -21,6 +21,10 @@ class RegisterDialog(MessageBoxBase):
         self.nameLineEdit.setPlaceholderText('请输入音色名称...')
         self.nameLineEdit.setClearButtonEnabled(True)
 
+        # 调整布局边距，避免标题被裁剪
+        self.viewLayout.setContentsMargins(24, 16, 24, 24)
+        self.viewLayout.setSpacing(12)
+        
         # 添加控件到布局
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.nameLineEdit)

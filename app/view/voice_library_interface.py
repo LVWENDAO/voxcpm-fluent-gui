@@ -21,14 +21,18 @@ class RenameDialog(MessageBoxBase):
         self.nameLineEdit.setText(current_name)
         self.nameLineEdit.setPlaceholderText("请输入新的音色名称")
         
-        # 布局
+        # 调整布局边距，避免标题被裁剪
+        self.viewLayout.setContentsMargins(24, 16, 24, 24)
+        self.viewLayout.setSpacing(12)
+        
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.nameLineEdit)
-        self.viewLayout.setSpacing(10)
         
         # 设置按钮文本
         self.yesButton.setText('确定')
         self.cancelButton.setText('取消')
+        
+        self.widget.setMinimumWidth(350)
         
         # 自动聚焦
         self.nameLineEdit.setFocus()
