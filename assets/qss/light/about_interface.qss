@@ -1,0 +1,4 @@
+/* About Interface */
+#aboutInterface {
+    background-color: transparent;
+}

@@ -11,6 +11,7 @@ class StyleSheet(StyleSheetBase, Enum):
     LOGS_INTERFACE = "logs_interface"
     SETTING_INTERFACE = "setting_interface"
     TAG_MANAGER_INTERFACE = "tag_manager_interface"
+    ABOUT_INTERFACE = "about_interface"
 
     def path(self, theme=Theme.AUTO):
         theme = qconfig.theme if theme == Theme.AUTO else theme

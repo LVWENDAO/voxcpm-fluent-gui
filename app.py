@@ -4,6 +4,7 @@ import sys
 
 # 导入编译后的资源文件，注册 :/qss/... 路径
 import resources
+import resource_rc
 
 from PyQt5.QtCore import Qt, QTranslator
 from PyQt5.QtGui import QFont, QFontDatabase

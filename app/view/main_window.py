@@ -16,6 +16,7 @@ from app.view.history_interface import HistoryInterface
 from app.view.voice_library_interface import VoiceLibraryInterface
 from app.view.tag_manager_interface import TagManagerInterface
 from app.view.setting_interface import SettingInterface
+from app.view.about_interface import AboutInterface
 
 # 导入资源文件（确保资源被加载）
 import app.resource_rc
@@ -36,6 +37,7 @@ class MainWindow(FluentWindow):
         self.voiceLibraryInterface = VoiceLibraryInterface(self)
         self.tagManagerInterface = TagManagerInterface(self)
         self.settingInterface = SettingInterface(self)
+        self.aboutInterface = AboutInterface(self)
 
         # enable acrylic effect
         self.navigationInterface.setAcrylicEnabled(True)
@@ -64,6 +66,8 @@ class MainWindow(FluentWindow):
         
         self.addSubInterface(
             self.settingInterface, FIF.SETTING, "设置", NavigationItemPosition.BOTTOM)
+        self.addSubInterface(
+            self.aboutInterface, FIF.INFO, "关于", NavigationItemPosition.BOTTOM)
 
     def initWindow(self):
         self.resize(960, 780)

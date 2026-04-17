@@ -5,6 +5,8 @@
         <file alias="logo_48.png">assets/images/logo_48.png</file>
         <file alias="logo_256.png">assets/images/logo_256.png</file>
         <file alias="icon.ico">assets/images/icon.ico</file>
+        <file alias="voxcpm_logo.png">assets/images/voxcpm_logo.png</file>
+        <file alias="github.png">assets/images/github.png</file>
     </qresource>
     <qresource prefix="/fonts">
         <file alias="SourceHanSansSC-VF.ttf">assets/fonts/SourceHanSansSC-VF.ttf</file>
@@ -20,5 +22,7 @@
         <file alias="dark/setting_interface.qss">assets/qss/dark/setting_interface.qss</file>
         <file alias="light/tag_manager_interface.qss">assets/qss/light/tag_manager_interface.qss</file>
         <file alias="dark/tag_manager_interface.qss">assets/qss/dark/tag_manager_interface.qss</file>
+        <file alias="light/about_interface.qss">assets/qss/light/about_interface.qss</file>
+        <file alias="dark/about_interface.qss">assets/qss/dark/about_interface.qss</file>
     </qresource>
 </RCC>
