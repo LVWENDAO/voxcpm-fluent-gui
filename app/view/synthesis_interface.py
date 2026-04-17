@@ -1184,13 +1184,11 @@ class SynthesisInterface(ScrollArea):
             # 检查该分类下是否有标签被选中
             has_selected = any(tag in self.selected_tags for tag in tags)
             
-            # 核心逻辑：利用全角空格保持宽度恒定
+            # 核心逻辑：利用固定宽度，安全切换文本
             if has_selected:
-                # 选中时：显示圆点
                 btn.setText(f"{category_name} ●")
             else:
-                # 未选中时：显示全角空格（宽度相同但不可见）
-                btn.setText(f"{category_name}\u3000")
+                btn.setText(category_name)
     
     def __load_dynamic_tags(self):
         """从标签管理系统动态加载标签"""
@@ -1226,8 +1224,16 @@ class SynthesisInterface(ScrollArea):
             for category_name in tags_config.keys():
                 if first_category is None:
                     first_category = category_name
-                # 使用全角空格占位（宽度与圆点一致），确保按钮宽度恒定
-                cat_btn = PillPushButton(f"{category_name}\u3000")
+                # 1. 先以带圆点的文本创建，测量最大宽度
+                cat_btn = PillPushButton(f"{category_name} ●")
+                cat_btn.setCheckable(True)
+                
+                # 2. 锁定宽度，防止后续文本切换引起布局抖动
+                cat_btn.setFixedWidth(cat_btn.sizeHint().width())
+                
+                # 3. 恢复为无圆点文本
+                cat_btn.setText(category_name)
+                
                 cat_btn.clicked.connect(lambda checked, name=category_name: self.__on_category_nav_clicked(name))
                 self._category_buttons[category_name] = cat_btn
                 self.categoryNavLayout.addWidget(cat_btn)
