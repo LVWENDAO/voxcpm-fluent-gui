@@ -762,12 +762,22 @@ class SynthesisInterface(ScrollArea):
         # 获取选中的 voice_id，如果是第一个选项（None）则不传
         voice_id = None
         current_index = self.voiceComboBox.currentIndex()
-        if current_index > 0:  # 索引 0 是“不使用音色缓存”
+        if current_index > 0:  # 索引 0 是"不使用音色缓存"
             voice_id = self.voiceComboBox.itemData(current_index)
-
+        
+        # 模式1：使用缓存音色时，忽略参考音频和控制指令
+        if voice_id:
+            # 使用缓存音色模式，不传递参考音频
+            ref_path = None
+            # 控制指令已在 final_text 中拼接，需要还原
+            final_text = text  # 还原为原始文本，不拼接控制指令
+        else:
+            # 非缓存模式，正常传递参考音频
+            ref_path = getattr(self, 'ref_audio_path', None)
+        
         payload = {
             "text": final_text,
-            "reference_wav_path": getattr(self, 'ref_audio_path', None),
+            "reference_wav_path": ref_path,
             "prompt_wav_path": getattr(self, 'ref_audio_path', None) if self.ultimateSwitch.isChecked() else None,
             "prompt_text": self.asrInput.toPlainText().strip() if self.ultimateSwitch.isChecked() else None,
             "cfg_value": self.cfgSlider.value() / 10.0,

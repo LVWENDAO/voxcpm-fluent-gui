@@ -6,6 +6,9 @@
         <file alias="logo_256.png">assets/images/logo_256.png</file>
         <file alias="icon.ico">assets/images/icon.ico</file>
     </qresource>
+    <qresource prefix="/fonts">
+        <file alias="SourceHanSansSC-VF.ttf">assets/fonts/SourceHanSansSC-VF.ttf</file>
+    </qresource>
     <qresource prefix="/qss">
         <file alias="light/home_interface.qss">assets/qss/light/home_interface.qss</file>
         <file alias="dark/home_interface.qss">assets/qss/dark/home_interface.qss</file>

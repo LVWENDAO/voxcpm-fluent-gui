@@ -44,3 +44,7 @@ config/config.json
 outputs/
 *.wav
 *.mp3
+
+# Generated files
+resources.py
+assets/fonts/SourceHanSansSC-VF.ttf

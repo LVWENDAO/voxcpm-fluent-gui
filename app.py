@@ -6,7 +6,7 @@ import sys
 import resources
 
 from PyQt5.QtCore import Qt, QTranslator
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QFontDatabase
 from PyQt5.QtWidgets import QApplication
 from qfluentwidgets import FluentTranslator
 
@@ -28,6 +28,12 @@ QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
 # create application
 app = QApplication(sys.argv)
 app.setAttribute(Qt.AA_DontCreateNativeWidgetSiblings)
+
+# 加载思源黑体（解决 OpenType 警告）
+font_id = QFontDatabase.addApplicationFont(':/fonts/SourceHanSansSC-VF.ttf')
+if font_id != -1:
+    font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
+    app.setFont(QFont(font_family))
 
 # Windows-specific: Set AppUserModelID to ensure taskbar icon displays correctly
 if sys.platform == "win32":
