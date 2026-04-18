@@ -151,7 +151,9 @@ def generate_speech(request: SynthesisRequest):
             "id": history_id, 
             "text": request.text, 
             "duration": duration,
-            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "inference_timesteps": request.inference_timesteps,
+            "cfg_value": request.cfg_value
         }
         with open(history_folder / "meta.json", 'w', encoding='utf-8') as f:
             json.dump(meta_data, f, ensure_ascii=False, indent=2)

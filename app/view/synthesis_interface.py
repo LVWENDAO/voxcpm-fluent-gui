@@ -949,14 +949,36 @@ class SynthesisInterface(ScrollArea):
         try:
             if index == 0:
                 # 传统模式：恢复默认参数，启用控制指令输入框
-                self.stepsSlider.setValue(25)
-                self.cfgSlider.setValue(50)
+                self.stepsSlider.setValue(10)
+                self.cfgSlider.setValue(20)
                 self.promptInput.setEnabled(True)
                 self.promptInput.setPlaceholderText("如：年轻女性，温柔甜美 / A warm young woman")
                 InfoBar.info(title='提示', content="已切换至传统推理模式（不使用音色缓存）", parent=self)
                 return
             
-            # 音色模式：禁用控制指令输入框（但保留内容）
+            # 音色模式：读取并应用保存的参数
+            voice_id = self.voiceComboBox.itemData(index)
+            if voice_id:
+                base_dir = get_resource_path()
+                db_path = base_dir / "voice_cache" / "voices_db.json"
+                if db_path.exists():
+                    with open(db_path, 'r', encoding='utf-8') as f:
+                        db = json.load(f)
+                    
+                    voice_data = db.get(voice_id, {})
+                    config = voice_data.get('config', {})
+                    
+                    # 应用保存的参数
+                    steps = config.get('inference_timesteps', 10)
+                    cfg = config.get('cfg_value', 2.0)
+                    
+                    # 转换为滑块值（steps直接，cfg需要*10）
+                    self.stepsSlider.setValue(int(steps))
+                    self.cfgSlider.setValue(int(cfg * 10))
+                    
+                    print(f"[Voice Load] Applied config: steps={steps}, cfg={cfg}")
+            
+            # 禁用控制指令输入框
             self.promptInput.setEnabled(False)
             self.promptInput.setPlaceholderText("使用音色库时不可使用控制指令")
         except Exception as e:
