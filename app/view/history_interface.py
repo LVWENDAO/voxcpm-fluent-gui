@@ -150,8 +150,8 @@ class HistoryInterface(QWidget):
                         data = json.load(f)
                     
                     # 文本内容
-                    text = data.get("text", "")[:100]
-                    if len(data.get("text", "")) > 100:
+                    text = data.get("text", "")[:200]
+                    if len(data.get("text", "")) > 200:
                         text += "..."
                     self.tableView.setItem(row, 0, QTableWidgetItem(text))
                     self.tableView.item(row, 0).setData(Qt.UserRole, data.get("id", ""))

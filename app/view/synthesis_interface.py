@@ -1266,7 +1266,12 @@ class SynthesisInterface(ScrollArea):
             from pathlib import Path
             
             # 1. 计算项目根目录 (VoxCPM2/)
-            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            # 打包后 sys.executable 指向 exe 本身，其父目录即为项目根目录
+            if getattr(sys, 'frozen', False):
+                project_root = Path(sys.executable).resolve().parent
+            else:
+                project_root = Path(__file__).resolve().parent.parent.parent.parent
+            
             env_python = project_root / "voxcpm2_env" / "python.exe"
             
             # 2. 确定脚本路径
