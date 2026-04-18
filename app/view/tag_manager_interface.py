@@ -15,6 +15,7 @@ from qfluentwidgets import (
     MessageBoxBase, SubtitleLabel, SearchLineEdit, isDarkTheme, setTheme, SegmentedWidget, TabBar, TabCloseButtonDisplayMode, ToolButton,
     SimpleCardWidget
 )
+from app.common.resource_utils import get_resource_path
 
 
 class InputDialog(MessageBoxBase):
@@ -299,7 +300,7 @@ class TagManagerInterface(QWidget):
         self.setObjectName("tagManagerInterface")
         
         # 配置文件路径
-        base_dir = Path(__file__).resolve().parent.parent.parent.parent
+        base_dir = get_resource_path()
         self.config_dir = base_dir / "config"
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.config_file = self.config_dir / "tags_config.json"

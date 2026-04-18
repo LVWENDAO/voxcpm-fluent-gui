@@ -15,6 +15,8 @@ from qfluentwidgets import (ScrollArea, CardWidget, TitleLabel, CaptionLabel,
 from qfluentwidgets.multimedia import StandardMediaPlayBar
 
 from app.common.style_sheet import StyleSheet
+from app.common.resource_utils import get_resource_path
+from app.common.signal_bus import signalBus
 
 
 class FlowLayout(QLayout):
@@ -253,7 +255,7 @@ class SynthesisInterface(ScrollArea):
         signalBus.tagToggled.connect(self.__on_tag_toggled_from_manager)
         
         # 启动时加载音色并开始监听
-        base_dir = Path(__file__).resolve().parent.parent.parent.parent
+        base_dir = get_resource_path()
         voice_cache_dir = base_dir / "voice_cache"  # 修正路径，与音色库界面保持一致
         voice_cache_dir.mkdir(parents=True, exist_ok=True)
         self.watcher.addPath(str(voice_cache_dir))
@@ -896,7 +898,7 @@ class SynthesisInterface(ScrollArea):
 
         try:
             import shutil, hashlib, time
-            base_dir = Path(__file__).resolve().parent.parent.parent.parent
+            base_dir = get_resource_path()
             history_folder = base_dir / "outputs" / "generation_history" / self.last_history_id
             
             # 读取历史元数据
@@ -1003,7 +1005,7 @@ class SynthesisInterface(ScrollArea):
             if not voice_id:
                 return
             
-            base_dir = Path(__file__).resolve().parent.parent.parent.parent
+            base_dir = get_resource_path()
             db_path = base_dir / "voice_cache" / "voices_db.json"
             
             if db_path.exists():
@@ -1041,7 +1043,7 @@ class SynthesisInterface(ScrollArea):
     def __onLoadVoices(self):
         """从本地文件系统加载音色列表（前端直读）"""
         try:
-            base_dir = Path(__file__).resolve().parent.parent.parent.parent
+            base_dir = get_resource_path()
             voice_cache_dir = base_dir / "voice_cache"  # 独立于 outputs
             db_path = voice_cache_dir / "voices_db.json"
             
@@ -1197,7 +1199,7 @@ class SynthesisInterface(ScrollArea):
             import json
             
             # 获取标签配置
-            base_dir = Path(__file__).resolve().parent.parent.parent.parent
+            base_dir = get_resource_path()
             config_file = base_dir / "config" / "tags_config.json"
             
             if not config_file.exists():

@@ -11,6 +11,7 @@ from qfluentwidgets import (
     LineEdit, MessageBoxBase, SubtitleLabel, IconWidget, RoundMenu, Action
 )
 from qfluentwidgets.multimedia import StandardMediaPlayBar
+from app.common.resource_utils import get_resource_path
 
 class RegisterDialog(MessageBoxBase):
     """ 注册音色弹窗 """
@@ -96,7 +97,7 @@ class HistoryInterface(QWidget):
         self.mainLayout.addWidget(self.playBar)
         
         # 路径配置
-        base_dir = Path(__file__).resolve().parent.parent.parent.parent
+        base_dir = get_resource_path()
         self.history_dir = base_dir / "outputs" / "generation_history"
         self.history_dir.mkdir(parents=True, exist_ok=True)
         
@@ -177,7 +178,7 @@ class HistoryInterface(QWidget):
         if not voice_id:
             return False
         try:
-            base_dir = Path(__file__).resolve().parent.parent.parent.parent
+            base_dir = get_resource_path()
             db_path = base_dir / "voice_cache" / "voices_db.json"
             if not db_path.exists():
                 return False
@@ -214,7 +215,7 @@ class HistoryInterface(QWidget):
             InfoBar.warning(title='提示', content="名称不能为空", parent=self)
             return
         
-        base_dir = Path(__file__).resolve().parent.parent.parent.parent
+        base_dir = get_resource_path()
         history_folder = base_dir / "outputs" / "generation_history" / history_id
         
         # 1. 读取历史元数据

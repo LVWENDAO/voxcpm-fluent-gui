@@ -11,6 +11,7 @@ from qfluentwidgets import (
     LineEdit, MessageBoxBase, SubtitleLabel, RoundMenu, Action
 )
 from qfluentwidgets.multimedia import StandardMediaPlayBar
+from app.common.resource_utils import get_resource_path
 
 class RenameDialog(MessageBoxBase):
     """重命名对话框"""
@@ -95,7 +96,7 @@ class VoiceLibraryInterface(QWidget):
         self.mainLayout.addWidget(self.playBar)
         
         # 路径配置
-        base_dir = Path(__file__).resolve().parent.parent.parent.parent
+        base_dir = get_resource_path()
         self.voice_cache_dir = base_dir / "voice_cache"
         self.voice_cache_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.voice_cache_dir / "voices_db.json"

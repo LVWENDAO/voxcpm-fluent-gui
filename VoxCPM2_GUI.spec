@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = ['qfluentwidgets', 'darkdetect', 'PyQt5.QtXml', 'PyQt5.QtSvg', 'qframelesswindow', 'uuid']
+hiddenimports = ['qfluentwidgets', 'darkdetect', 'PyQt5.QtXml', 'PyQt5.QtSvg', 'PyQt5.QtMultimediaWidgets', 'qframelesswindow', 'uuid']
 tmp_ret = collect_all('qfluentwidgets')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
