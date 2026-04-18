@@ -393,13 +393,13 @@ class SynthesisInterface(ScrollArea):
         # 3. 控制指令卡 (高度自适应)
         promptCard = CardWidget()
         promptLayout = QVBoxLayout(promptCard)
-        promptLayout.setContentsMargins(16, 8, 16, 8)  # 减小上下内边距
-        promptLayout.setSpacing(4)  # 减小组件间距
+        promptLayout.setContentsMargins(16, 6, 16, 6)  # 缩小上下内边距 (-4像素)
+        promptLayout.setSpacing(4)  # 组件间距
         
         promptTitle = StrongBodyLabel("控制指令（可选）")
         self.promptInput = PlainTextEdit()
         self.promptInput.setPlaceholderText("如：年轻女性，温柔甜美 / A warm young woman")
-        self.promptInput.setMaximumHeight(48)  # 减少1/5高度 (60 -> 48)
+        self.promptInput.setMaximumHeight(40)  # 缩小输入框高度 (-8像素)
         self.promptInput.setToolTip("通过文字描述生成目标音色，无需参考音频")
         self.promptInput.installEventFilter(ToolTipFilter(self.promptInput))
         
@@ -437,7 +437,7 @@ class SynthesisInterface(ScrollArea):
         self.tagsScrollArea.setWidgetResizable(True)
         self.tagsScrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.tagsScrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.tagsScrollArea.setMaximumHeight(180)
+        self.tagsScrollArea.setMaximumHeight(172)  # 缩小标签区域高度 (-8像素)
         self.tagsScrollArea.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
         # 标签内容容器（使用流式布局）
@@ -820,13 +820,26 @@ class SynthesisInterface(ScrollArea):
                     )
             else:
                 error_msg = data.get('error') or data.get('detail', '未知错误')
-                InfoBar.error(
-                    title='错误', 
-                    content=error_msg, 
-                    parent=self,
-                    position=InfoBarPosition.TOP,
-                    duration=-1
-                )
+                
+                # 针对音频降噪的特殊错误提供友好提示
+                if 'Audio buffer is not finite' in str(error_msg) or 'not finite everywhere' in str(error_msg):
+                    error_msg = "音频降噪失败：参考音频可能过于安静或包含静音片段。\n\n建议：\n1. 更换参考音频文件\n2. 关闭「音频降噪」开关后重试\n3. 确保参考音频有清晰的语音内容"
+                    InfoBar.error(
+                        title='音频处理错误', 
+                        content=error_msg, 
+                        parent=self,
+                        position=InfoBarPosition.TOP,
+                        duration=-1,
+                        isClosable=True
+                    )
+                else:
+                    InfoBar.error(
+                        title='错误', 
+                        content=error_msg, 
+                        parent=self,
+                        position=InfoBarPosition.TOP,
+                        duration=-1
+                    )
         else:
             InfoBar.error(
                 title='网络错误', 

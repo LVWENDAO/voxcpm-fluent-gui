@@ -83,7 +83,7 @@ def load_model():
         
         model = VoxCPM.from_pretrained(
             model_path,
-            load_denoiser=False,
+            load_denoiser=True,  # 启用降噪模型以支持denoise参数
             local_files_only=True  # 强制使用本地文件
         )
         logger.info(f"Model loaded successfully. Sample rate: {model.tts_model.sample_rate}")
@@ -116,6 +116,8 @@ def generate_speech(request: SynthesisRequest):
             voice_id=request.voice_id,
             voice_cache_dir=str(VOICE_CACHE_DIR),
             reference_wav_path=request.reference_wav_path,
+            denoise=request.denoise_enabled,
+            normalize=request.normalize_text,
             return_audio_feat=True
         )
 
