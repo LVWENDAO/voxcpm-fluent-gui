@@ -5,7 +5,8 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 
 from qfluentwidgets import (ScrollArea, CardWidget, StrongBodyLabel, BodyLabel, 
                             CaptionLabel, HyperlinkButton, FluentIcon as FIF,
-                            TransparentToolButton, setTheme, Theme)
+                            TransparentToolButton, setTheme, Theme, TextBrowser,
+                            SubtitleLabel)
 
 from app.common.style_sheet import StyleSheet
 
@@ -114,16 +115,20 @@ class AboutInterface(ScrollArea):
 
     def __initLayout(self):
         self.vBoxLayout.setContentsMargins(32, 32, 32, 32)
-        self.vBoxLayout.setSpacing(20)
+        self.vBoxLayout.setSpacing(24)
 
         # 标题
-        titleLabel = StrongBodyLabel("关于 VoxCPM2 GUI", self)
+        titleLabel = StrongBodyLabel("关于 VoxCPM2 GUI", self.view)
         self.vBoxLayout.addWidget(titleLabel)
 
         # 导入资源
         import app.resource_rc
         
-        # 1. VOXCPM 官方
+        # 1. 贡献者卡片 - 一行三列布局
+        contributorsRow = QHBoxLayout()
+        contributorsRow.setSpacing(16)
+        
+        # VOXCPM 官方
         officialCard = ContributorCard(
             avatar_path=":/images/github.png",
             title="VoxCPM 官方",
@@ -134,9 +139,9 @@ class AboutInterface(ScrollArea):
             ],
             parent=self.view
         )
-        self.vBoxLayout.addWidget(officialCard)
+        contributorsRow.addWidget(officialCard, 1)
 
-        # 2. GUI 组件贡献者
+        # GUI 组件贡献者
         guiCard = ContributorCard(
             avatar_path=":/images/github.png",
             title="GUI 组件贡献者",
@@ -147,9 +152,9 @@ class AboutInterface(ScrollArea):
             ],
             parent=self.view
         )
-        self.vBoxLayout.addWidget(guiCard)
+        contributorsRow.addWidget(guiCard, 1)
 
-        # 3. 构建者（你）
+        # 构建者（你）
         builderCard = ContributorCard(
             avatar_path=":/images/github.png",
             title="XDAOX",
@@ -159,6 +164,93 @@ class AboutInterface(ScrollArea):
             ],
             parent=self.view
         )
-        self.vBoxLayout.addWidget(builderCard)
+        contributorsRow.addWidget(builderCard, 1)
+        
+        self.vBoxLayout.addLayout(contributorsRow)
+
+        # 2. 许可证与使用声明卡片 - 优化布局
+        license_card = CardWidget(self.view)
+        license_layout = QVBoxLayout(license_card)
+        license_layout.setContentsMargins(28, 24, 28, 24)
+        license_layout.setSpacing(18)
+        
+        # 标题区域
+        headerLayout = QHBoxLayout()
+        license_title = SubtitleLabel("许可证与使用声明", self.view)
+        headerLayout.addWidget(license_title)
+        headerLayout.addStretch()
+        license_layout.addLayout(headerLayout)
+        
+        # 内容网格布局（两列）
+        contentGrid = QHBoxLayout()
+        contentGrid.setSpacing(24)
+        
+        # 左列：许可证信息 + 使用限制
+        leftColumn = QVBoxLayout()
+        leftColumn.setSpacing(14)
+        
+        # 许可证
+        lic_section = QVBoxLayout()
+        lic_section.setSpacing(6)
+        lic_label = StrongBodyLabel("开源许可证", self.view)
+        lic_section.addWidget(lic_label)
+        license_text = BodyLabel(
+            "本项目基于 VoxCPM2 构建，遵循 Apache-2.0 开源许可证。\n"
+            "VoxCPM2 由 OpenBMB（面壁智能）团队开发并发布。",
+            self.view
+        )
+        license_text.setWordWrap(True)
+        lic_section.addWidget(license_text)
+        leftColumn.addLayout(lic_section)
+        
+        # 使用范围限制
+        restrict_section = QVBoxLayout()
+        restrict_section.setSpacing(6)
+        restrict_label = StrongBodyLabel("使用范围限制", self.view)
+        restrict_section.addWidget(restrict_label)
+        restriction_text = BodyLabel(
+            "禁止将本软件用于以下用途：\n"
+            "• 生成虚假、欺诈或误导性语音内容\n"
+            "• 侵犯他人隐私权、肖像权或声音权\n"
+            "• 进行非法活动或传播违法信息\n"
+            "• 冒充他人身份进行诈骗或诽谤\n"
+            "• 任何违反当地法律法规的行为",
+            self.view
+        )
+        restriction_text.setWordWrap(True)
+        restrict_section.addWidget(restriction_text)
+        leftColumn.addLayout(restrict_section)
+        
+        contentGrid.addLayout(leftColumn, 1)
+        
+        # 右列：免责声明
+        rightColumn = QVBoxLayout()
+        rightColumn.setSpacing(14)
+        
+        disclaimer_section = QVBoxLayout()
+        disclaimer_section.setSpacing(6)
+        disclaimer_label = StrongBodyLabel("免责声明", self.view)
+        disclaimer_section.addWidget(disclaimer_label)
+        disclaimer_text = BodyLabel(
+            "本软件仅供学习、研究和个人娱乐使用。\n\n"
+            "使用者应自行承担因使用本软件产生的一切后果，包括但不限于：\n"
+            "• 数据泄露或隐私侵权\n"
+            "• 知识产权纠纷\n"
+            "• 法律责任或经济损失\n\n"
+            "作者不对任何直接或间接损害承担责任，包括但不限于：\n"
+            "• 数据丢失或损坏\n"
+            "• 业务中断或利润损失\n"
+            "• 第三方索赔或法律诉讼\n\n"
+            "若使用者违反上述使用限制或造成任何损害，与本项目作者及贡献者无关。",
+            self.view
+        )
+        disclaimer_text.setWordWrap(True)
+        disclaimer_section.addWidget(disclaimer_text)
+        rightColumn.addLayout(disclaimer_section)
+        
+        contentGrid.addLayout(rightColumn, 1)
+        license_layout.addLayout(contentGrid)
+        
+        self.vBoxLayout.addWidget(license_card)
 
         self.vBoxLayout.addStretch(1)

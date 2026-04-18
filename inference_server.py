@@ -79,11 +79,14 @@ def load_model():
         
         # 使用本地模型路径
         model_path = str(Path(__file__).parent.parent / "model_weights")
+        denoiser_path = str(Path(__file__).parent.parent / "speech_zipenhancer_ans_multiloss_16k_base")
         logger.info(f"Using local model path: {model_path}")
+        logger.info(f"Using local denoiser path: {denoiser_path}")
         
         model = VoxCPM.from_pretrained(
             model_path,
             load_denoiser=True,  # 启用降噪模型以支持denoise参数
+            zipenhancer_model_id=denoiser_path,  # 使用项目根目录下的本地降噪模型
             local_files_only=True  # 强制使用本地文件
         )
         logger.info(f"Model loaded successfully. Sample rate: {model.tts_model.sample_rate}")
