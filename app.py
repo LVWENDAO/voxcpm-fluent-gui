@@ -2,10 +2,6 @@
 import os
 import sys
 import traceback
-import faulthandler
-
-# 启用Python层面的段错误追踪
-faulthandler.enable()
 
 # 导入编译后的资源文件，注册 :/qss/... 路径
 import resources

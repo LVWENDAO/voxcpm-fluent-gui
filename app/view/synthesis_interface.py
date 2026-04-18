@@ -109,8 +109,8 @@ class PerformanceMonitorCard(CardWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 10, 16, 10)  # 减小内边距
-        layout.setSpacing(8)  # 减小组件间距
+        layout.setContentsMargins(16, 12, 16, 15)  # 增加上下内边距
+        layout.setSpacing(10)  # 增加组件间距
 
         # 监控项容器
         monitorsLayout = QHBoxLayout()
@@ -118,11 +118,11 @@ class PerformanceMonitorCard(CardWidget):
 
         # 1. GPU 监控
         self.gpuRing = ProgressRing()
-        self.gpuRing.setFixedSize(40, 40)
+        self.gpuRing.setFixedSize(60, 60)  # 增大圆环尺寸
         self.gpuRing.setTextVisible(True)
         self.gpuInfo = CaptionLabel("GPU: --%")
         gpuLayout = QVBoxLayout()
-        gpuLayout.setSpacing(2)
+        gpuLayout.setSpacing(5)
         gpuLayout.setAlignment(Qt.AlignCenter)
         gpuLayout.addWidget(self.gpuRing, 0, Qt.AlignHCenter)
         gpuLayout.addWidget(self.gpuInfo, 0, Qt.AlignHCenter)
@@ -130,11 +130,11 @@ class PerformanceMonitorCard(CardWidget):
 
         # 2. 显存监控
         self.vramRing = ProgressRing()
-        self.vramRing.setFixedSize(40, 40)
+        self.vramRing.setFixedSize(50, 50)  # 增大圆环尺寸
         self.vramRing.setTextVisible(False)
         self.vramInfo = CaptionLabel("显存: -- / -- GB")
         vramLayout = QVBoxLayout()
-        vramLayout.setSpacing(2)
+        vramLayout.setSpacing(4)
         vramLayout.setAlignment(Qt.AlignCenter)
         vramLayout.addWidget(self.vramRing, 0, Qt.AlignHCenter)
         vramLayout.addWidget(self.vramInfo, 0, Qt.AlignHCenter)
@@ -142,11 +142,11 @@ class PerformanceMonitorCard(CardWidget):
 
         # 3. 内存监控
         self.ramRing = ProgressRing()
-        self.ramRing.setFixedSize(40, 40)
+        self.ramRing.setFixedSize(50, 50)  # 增大圆环尺寸
         self.ramRing.setTextVisible(False)
         self.ramInfo = CaptionLabel("内存: -- / -- GB")
         ramLayout = QVBoxLayout()
-        ramLayout.setSpacing(2)
+        ramLayout.setSpacing(4)
         ramLayout.setAlignment(Qt.AlignCenter)
         ramLayout.addWidget(self.ramRing, 0, Qt.AlignHCenter)
         ramLayout.addWidget(self.ramInfo, 0, Qt.AlignHCenter)
@@ -399,7 +399,7 @@ class SynthesisInterface(ScrollArea):
         promptTitle = StrongBodyLabel("控制指令（可选）")
         self.promptInput = PlainTextEdit()
         self.promptInput.setPlaceholderText("如：年轻女性，温柔甜美 / A warm young woman")
-        self.promptInput.setMaximumHeight(40)  # 缩小输入框高度 (-8像素)
+        self.promptInput.setMaximumHeight(60)  # 与参考音频文本框高度一致
         self.promptInput.setToolTip("通过文字描述生成目标音色，无需参考音频")
         self.promptInput.installEventFilter(ToolTipFilter(self.promptInput))
         
@@ -437,7 +437,7 @@ class SynthesisInterface(ScrollArea):
         self.tagsScrollArea.setWidgetResizable(True)
         self.tagsScrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.tagsScrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.tagsScrollArea.setMaximumHeight(172)  # 缩小标签区域高度 (-8像素)
+        self.tagsScrollArea.setMaximumHeight(140)  # 缩减标签区域高度20像素
         self.tagsScrollArea.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
         # 标签内容容器（使用流式布局）
@@ -477,10 +477,13 @@ class SynthesisInterface(ScrollArea):
         voiceLayout.addLayout(regLayout)
         voiceLayout.addWidget(self.voiceComboBox)
 
+        # 5. 性能监视器（提前创建，供左侧使用）
+        self.perfCard = PerformanceMonitorCard()
+
         leftLayout.addWidget(self.serverCard)
         leftLayout.addWidget(refCard)
         leftLayout.addWidget(promptCard)
-        leftLayout.addWidget(voiceCard)
+        leftLayout.addWidget(self.perfCard)  # 性能监视器移至左侧底部
         leftLayout.addStretch(1) # 仅保留底部弹性空间
 
         # --- 右列：目标文本 + 结果展示区 (50%) ---
@@ -609,15 +612,12 @@ class SynthesisInterface(ScrollArea):
         from app.common.audio_manager import audioManager
         audioManager.register_player(self.playBar)
 
-        # 5. 性能监视器
-        self.perfCard = PerformanceMonitorCard()
-
         rightLayout.addWidget(textCard)
         rightLayout.addWidget(advCard)
         rightLayout.addWidget(self.generateBtn)
         rightLayout.addWidget(self.inferenceProgressBar)  # 添加推理进度条
         rightLayout.addWidget(self.playBar)
-        rightLayout.addWidget(self.perfCard)
+        rightLayout.addWidget(voiceCard)  # 音色库移至右侧底部
         rightLayout.addStretch(1)
 
         self.mainLayout.addWidget(leftWidget, 1)
