@@ -56,7 +56,6 @@ class SynthesisRequest(BaseModel):
     denoise_enabled: bool = False
     normalize_text: bool = True
     voice_id: Optional[str] = None
-    seed: Optional[int] = None
 
 
 class SynthesisResponse(BaseModel):
@@ -146,8 +145,7 @@ def generate_speech(request: SynthesisRequest):
         meta_data = {
             "id": history_id, 
             "text": request.text, 
-            "duration": duration, 
-            "seed": request.seed,
+            "duration": duration,
             "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         }
         with open(history_folder / "meta.json", 'w', encoding='utf-8') as f:

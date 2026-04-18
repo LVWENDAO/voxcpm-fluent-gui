@@ -251,7 +251,6 @@ class HistoryInterface(QWidget):
                 "created_at": history_meta.get('timestamp', ''),
                 "prompt_text": history_meta.get('text', ''),
                 "config": {
-                    "seed": history_meta.get('seed', ''),
                     "inference_timesteps": history_meta.get('inference_timesteps', 32),
                     "cfg_value": history_meta.get('cfg_value', 4.0)
                 },

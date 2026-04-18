@@ -64,8 +64,8 @@ class VoiceLibraryInterface(QWidget):
         self.tableView.setBorderVisible(True)
         self.tableView.setBorderRadius(8)
         self.tableView.setWordWrap(False)
-        self.tableView.setColumnCount(5)
-        self.tableView.setHorizontalHeaderLabels(['音色名称', 'ID', 'Seed', 'Steps', 'CFG'])
+        self.tableView.setColumnCount(4)
+        self.tableView.setHorizontalHeaderLabels(['音色名称', 'ID', 'Steps', 'CFG'])
         self.tableView.verticalHeader().hide()
         self.tableView.setSelectionBehavior(TableWidget.SelectRows)
         self.tableView.setSelectionMode(TableWidget.SingleSelection)
@@ -76,11 +76,9 @@ class VoiceLibraryInterface(QWidget):
         self.tableView.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
         self.tableView.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
         self.tableView.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
-        self.tableView.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
         self.tableView.setColumnWidth(1, 100)
-        self.tableView.setColumnWidth(2, 80)
+        self.tableView.setColumnWidth(2, 60)
         self.tableView.setColumnWidth(3, 60)
-        self.tableView.setColumnWidth(4, 60)
         
         self.tableView.cellDoubleClicked.connect(self.onPlaySelected)
         
@@ -143,14 +141,11 @@ class VoiceLibraryInterface(QWidget):
                 # ID
                 self.tableView.setItem(row, 1, QTableWidgetItem(voice_id))
                 
-                # Seed
-                self.tableView.setItem(row, 2, QTableWidgetItem(str(config.get("seed", "N/A"))))
-                
                 # Steps
-                self.tableView.setItem(row, 3, QTableWidgetItem(str(config.get("inference_timesteps", "N/A"))))
+                self.tableView.setItem(row, 2, QTableWidgetItem(str(config.get("inference_timesteps", "N/A"))))
                 
                 # CFG
-                self.tableView.setItem(row, 4, QTableWidgetItem(str(config.get("cfg_value", "N/A"))))
+                self.tableView.setItem(row, 3, QTableWidgetItem(str(config.get("cfg_value", "N/A"))))
                 
         except Exception as e:
             print(f"[VoiceLibrary] Error loading voices: {e}")
