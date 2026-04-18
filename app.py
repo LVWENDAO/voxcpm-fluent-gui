@@ -1,12 +1,17 @@
 # coding:utf-8
 import os
 import sys
+import traceback
+import faulthandler
+
+# 启用Python层面的段错误追踪
+faulthandler.enable()
 
 # 导入编译后的资源文件，注册 :/qss/... 路径
 import resources
 import resource_rc
 
-from PyQt5.QtCore import Qt, QTranslator
+from PyQt5.QtCore import Qt, QTranslator, QObject
 from PyQt5.QtGui import QFont, QFontDatabase
 from PyQt5.QtWidgets import QApplication
 from qfluentwidgets import FluentTranslator
@@ -54,6 +59,20 @@ if locale:
 # create main window
 w = MainWindow()
 w.show()
+
+# 安装全局事件过滤器捕获崩溃
+class CrashGuard(QObject):
+    def eventFilter(self, obj, event):
+        try:
+            return super().eventFilter(obj, event)
+        except Exception as e:
+            print(f"\n[CRASH GUARD] Object: {type(obj).__name__}, Event: {event.type()}")
+            print(f"Error: {e}")
+            traceback.print_exc()
+            return False
+
+guard = CrashGuard(app)
+app.installEventFilter(guard)
 
 # start system theme listener
 w.themeListener.start()

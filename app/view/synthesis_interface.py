@@ -748,7 +748,14 @@ class SynthesisInterface(ScrollArea):
         request = QNetworkRequest(QUrl(f"{self.server_url}/generate"))
         request.setHeader(QNetworkRequest.ContentTypeHeader, "application/json")
         reply = self.network_manager.post(request, json.dumps(payload).encode())
-        reply.finished.connect(lambda: self.__on_inference_finished(reply))
+        
+        # 使用sender()获取reply，避免lambda捕获导致的悬空引用
+        def on_finished():
+            sender_reply = self.sender()
+            if sender_reply:
+                self.__on_inference_finished(sender_reply)
+        
+        reply.finished.connect(on_finished)
 
     def __on_inference_finished(self, reply):
         # 隐藏进度条
