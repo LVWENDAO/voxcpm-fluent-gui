@@ -4,6 +4,7 @@
 统一管理所有界面的音频播放，实现音量同步和播放互斥
 """
 from PyQt5.QtCore import QObject
+from PyQt5.QtMultimedia import QMediaPlayer
 
 
 class GlobalAudioManager(QObject):
@@ -60,13 +61,20 @@ class GlobalAudioManager(QObject):
                 lambda muted, pb=playBar: self._on_local_muted_changed(pb, muted)
             )
             
-            # 监听播放状态
-            original_play = playBar.play
-            def wrapped_play():
-                # 发送播放请求
+            # 补充 qfluentwidgets 缺失的 stateChanged 信号监听
+            # 确保其他播放器暂停时，按钮图标能正确更新
+            playBar.player.stateChanged.connect(
+                lambda state, pb=playBar: pb.playButton.setPlay(state == QMediaPlayer.PlayingState)
+            )
+            
+            # 包装底层 player.play() 方法，拦截所有播放请求
+            # 这能确保 togglePlayState、直接调用 playBar.play() 都能触发互斥
+            original_player_play = playBar.player.play
+            def wrapped_player_play():
+                # 发送播放请求，暂停其他播放器
                 self.signalBus.audioPlayRequested.emit(playBar)
-                original_play()
-            playBar.play = wrapped_play
+                original_player_play()
+            playBar.player.play = wrapped_player_play
     
     def _on_play_requested(self, requesting_player):
         """处理播放请求 - 暂停其他播放器"""
