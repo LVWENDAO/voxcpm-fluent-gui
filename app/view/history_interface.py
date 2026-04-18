@@ -1,6 +1,6 @@
 # coding:utf-8
 from PyQt5.QtCore import Qt, QTimer, QUrl, QFileSystemWatcher, QSize, QPoint
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem, QHeaderView, QFileDialog
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem, QHeaderView, QFileDialog, QApplication
 from PyQt5.QtGui import QIcon
 from pathlib import Path
 import json, shutil, hashlib, time
@@ -329,6 +329,34 @@ class HistoryInterface(QWidget):
         playAction = Action(FIF.PLAY, "播放")
         playAction.triggered.connect(lambda: self.onPlay(history_id))
         menu.addAction(playAction)
+        
+        menu.addSeparator()
+        
+        # 复制文本
+        copyTextAction = Action(FIF.COPY, "复制文本")
+        
+        def on_copy_text():
+            fid = history_id
+            folder = self.history_dir / fid
+            meta_file = folder / "meta.json"
+            if meta_file.exists():
+                try:
+                    with open(meta_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    text = data.get("text", "")
+                    if text:
+                        clipboard = QApplication.clipboard()
+                        clipboard.setText(text)
+                        InfoBar.success(title='成功', content='文本已复制到剪贴板', parent=self, duration=1500)
+                    else:
+                        InfoBar.warning(title='提示', content='该记录没有文本内容', parent=self)
+                except Exception as e:
+                    InfoBar.error(title='错误', content=f'读取文本失败：{str(e)}', parent=self)
+            else:
+                InfoBar.warning(title='提示', content='元数据文件不存在', parent=self)
+        
+        copyTextAction.triggered.connect(on_copy_text)
+        menu.addAction(copyTextAction)
         
         # 另存为
         saveAsAction = Action(FIF.SAVE_AS, "另存为")

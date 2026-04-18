@@ -101,7 +101,7 @@ def startup_event():
     """启动时预加载模型"""
     try:
         load_model()
-        logger.info("VoxCPM2 Inference Server started successfully")
+        logger.info("VoxCPM2 model initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize model: {e}")
         # 不退出，允许后续请求触发懒加载

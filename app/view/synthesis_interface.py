@@ -774,11 +774,13 @@ class SynthesisInterface(ScrollArea):
                 signalBus.historyGenerated.emit()
                 
                 if audio_path and os.path.exists(audio_path):
-                    # 使用标准播放栏加载并播放音频
-                    from PyQt5.QtCore import QUrl
+                    # 延迟500ms播放音频，避免界面卡顿
+                    from PyQt5.QtCore import QUrl, QTimer
                     from PyQt5.QtMultimedia import QMediaContent
-                    self.playBar.player.setSource(QMediaContent(QUrl.fromLocalFile(audio_path)))
-                    self.playBar.play()
+                    QTimer.singleShot(500, lambda: (
+                        self.playBar.player.setSource(QMediaContent(QUrl.fromLocalFile(audio_path))),
+                        self.playBar.play()
+                    ))
                     
                     # 创建自定义的成功提示
                     info_bar = InfoBar.success(
@@ -1261,18 +1263,17 @@ class SynthesisInterface(ScrollArea):
             
             # 定位 voxcpm2_env 环境下的 Python 解释器和 inference_server.py
             import os, sys
+            from pathlib import Path
             
-            # 1. 确定 Python 解释器路径 (优先使用 voxcpm2_env)
-            env_python = os.path.join(os.path.dirname(__file__), "..", "..", "..", "voxcpm2_env", "python.exe")
-            if not os.path.exists(env_python):
-                env_python = "h:/VoxCPM2/voxcpm2_env/python.exe"
+            # 1. 计算项目根目录 (VoxCPM2/)
+            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            env_python = project_root / "voxcpm2_env" / "python.exe"
             
             # 2. 确定脚本路径
-            script_path = os.path.join(os.path.dirname(__file__), "..", "..", "inference_server.py")
-            if not os.path.exists(script_path):
-                script_path = "h:/VoxCPM2/voxcpm-fluent-gui/inference_server.py"
+            gui_root = project_root / "voxcpm-fluent-gui"
+            script_path = gui_root / "inference_server.py"
 
-            if not os.path.exists(env_python) or not os.path.exists(script_path):
+            if not env_python.exists() or not script_path.exists():
                 self.serverLogCard.append_log("[错误] 找不到 voxcpm2_env 或 inference_server.py，请检查路径。")
                 self.serverProgressBar.stop()
                 self.serverProgressBar.setVisible(False)
@@ -1282,7 +1283,7 @@ class SynthesisInterface(ScrollArea):
 
             self.serverLogCard.append_log(f"[系统] 使用环境: {env_python}")
             # 启动进程
-            self.serverProcess.start(env_python, [script_path])
+            self.serverProcess.start(str(env_python), [str(script_path)])
         else:
             # 隐藏进度条
             self.serverProgressBar.stop()
@@ -1443,8 +1444,8 @@ class SynthesisInterface(ScrollArea):
                     if line.strip():
                         self.serverLogCard.append_log(line)
                         
-                        # 状态识别逻辑 (对齐原始 GUI 的启动成功标志)
-                        if "Uvicorn running on" in line or "Application startup complete" in line:
+                        # 状态识别逻辑 (仅匹配 Uvicorn 就绪日志，避免重复触发)
+                        if "Uvicorn running on" in line:
                             # 隐藏进度条
                             self.serverProgressBar.stop()
                             self.serverProgressBar.setVisible(False)
