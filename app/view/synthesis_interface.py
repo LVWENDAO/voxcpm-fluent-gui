@@ -807,7 +807,7 @@ class SynthesisInterface(ScrollArea):
                         target_text = target_text.replace(char, '')
                     default_name = (target_text[:50] if target_text else "audio") + ".wav"
                     
-                    def on_save_as(path=audio_path, dname=default_name):
+                    def on_save_as(checked=False, path=audio_path, dname=default_name):
                         save_path, _ = QFileDialog.getSaveFileName(
                             self.window(), "另存为", 
                             dname, 
