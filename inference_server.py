@@ -119,6 +119,8 @@ def generate_speech(request: SynthesisRequest):
             voice_id=request.voice_id,
             voice_cache_dir=str(VOICE_CACHE_DIR),
             reference_wav_path=request.reference_wav_path,
+            prompt_wav_path=request.prompt_wav_path,
+            prompt_text=request.prompt_text,
             denoise=request.denoise_enabled,
             normalize=request.normalize_text,
             return_audio_feat=True
