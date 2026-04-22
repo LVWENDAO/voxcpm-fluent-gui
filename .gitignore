@@ -48,3 +48,4 @@ outputs/
 # Generated files
 resources.py
 assets/fonts/SourceHanSansSC-VF.ttf
+resource_rc.py
